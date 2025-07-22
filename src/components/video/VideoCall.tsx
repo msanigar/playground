@@ -60,6 +60,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
   const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
+  const [showFeedbackWarning, setShowFeedbackWarning] = useState(false);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -138,16 +139,59 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
   const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
 
+  // Calculate dynamic grid layout based on participant count
+  const totalParticipants = (localParticipant?.stream ? 1 : 0) + remoteParticipants.length;
+  
+  const getGridClasses = () => {
+    switch (totalParticipants) {
+      case 0:
+      case 1:
+        return "grid grid-cols-1 gap-6 mb-6 max-w-2xl mx-auto";
+      case 2:
+        return "grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6";
+      case 3:
+      case 4:
+        return "grid grid-cols-1 md:grid-cols-2 gap-4 mb-6";
+      case 5:
+      case 6:
+        return "grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6";
+      default:
+        // 7+ participants: more compact grid
+        return "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 mb-6";
+    }
+  };
+
+  const getVideoClasses = () => {
+    switch (totalParticipants) {
+      case 0:
+      case 1:
+      case 2:
+        return "aspect-video"; // Full 16:9 aspect ratio
+      case 3:
+      case 4:
+        return "aspect-video"; // Still comfortable size
+      case 5:
+      case 6:
+        return "aspect-[4/3]"; // Slightly more square for better fit
+      default:
+        // 7+ participants: more compact
+        return "aspect-[4/3]"; // More square format
+    }
+  };
+
+  const getAudioIndicatorSize = () => {
+    return totalParticipants > 6 ? "text-[10px] px-2 py-0.5" : "text-xs px-3 py-1.5";
+  };
+
+  const getNameDisplaySize = () => {
+    return totalParticipants > 6 ? "text-xs px-2 py-1" : "text-sm px-3 py-2";
+  };
+
   // Audio monitoring functions - simplified to avoid interference
   const setupAudioMonitoring = useCallback(() => {
     try {
       // Cleanup previous monitoring
       cleanupAudioMonitoring();
-      
-      // Only set up audio monitoring if explicitly enabled
-      if (!showAudioControls) {
-        return;
-      }
       
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new AudioContext();
@@ -158,42 +202,51 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         audioContextRef.current.resume();
       }
 
-      // Monitor local audio - use a separate stream to avoid conflicts
+      // Always monitor local audio for the indicator (use a separate stream to avoid conflicts)
       if (actualMicEnabled && localMedia.state.localStream) {
         const audioTracks = localMedia.state.localStream.getAudioTracks();
         
-        if (audioTracks.length > 0 && audioTracks[0].enabled) {
-          // Clone the track to avoid conflicts
-          const clonedTrack = audioTracks[0].clone();
-          const mediaStream = new MediaStream([clonedTrack]);
-          const source = audioContextRef.current.createMediaStreamSource(mediaStream);
-          localAnalyserRef.current = audioContextRef.current.createAnalyser();
-          localAnalyserRef.current.fftSize = 256; // Smaller for less CPU usage
-          localAnalyserRef.current.smoothingTimeConstant = 0.8;
-          localAnalyserRef.current.minDecibels = -90;
-          localAnalyserRef.current.maxDecibels = -10;
-          source.connect(localAnalyserRef.current);
-        }
-      }
-
-      // Monitor remote audio similarly
-      remoteParticipants.forEach(participant => {
-        if (participant.stream && participant.isAudioEnabled) {
-          const audioTracks = participant.stream.getAudioTracks();
-          if (audioTracks.length > 0) {
+        if (audioTracks.length > 0 && audioTracks[0].enabled && audioTracks[0].readyState === 'live') {
+          try {
+            // Clone the track to avoid conflicts
             const clonedTrack = audioTracks[0].clone();
             const mediaStream = new MediaStream([clonedTrack]);
-            const source = audioContextRef.current!.createMediaStreamSource(mediaStream);
-            const analyser = audioContextRef.current!.createAnalyser();
-            analyser.fftSize = 256;
-            analyser.smoothingTimeConstant = 0.8;
-            analyser.minDecibels = -90;
-            analyser.maxDecibels = -10;
-            source.connect(analyser);
-            remoteAnalysersRef.current[participant.id] = analyser;
+            const source = audioContextRef.current.createMediaStreamSource(mediaStream);
+            localAnalyserRef.current = audioContextRef.current.createAnalyser();
+            localAnalyserRef.current.fftSize = 256; // Smaller for less CPU usage
+            localAnalyserRef.current.smoothingTimeConstant = 0.8;
+            localAnalyserRef.current.minDecibels = -90;
+            localAnalyserRef.current.maxDecibels = -10;
+            source.connect(localAnalyserRef.current);
+          } catch (error) {
+            console.warn('Failed to setup local audio monitoring:', error);
           }
         }
-      });
+      } else {
+        // Clear local audio level when muted
+        setLocalAudioLevel(0);
+      }
+
+      // Monitor remote audio only when Audio Levels panel is open
+      if (showAudioControls) {
+        remoteParticipants.forEach(participant => {
+          if (participant.stream && participant.isAudioEnabled) {
+            const audioTracks = participant.stream.getAudioTracks();
+            if (audioTracks.length > 0) {
+              const clonedTrack = audioTracks[0].clone();
+              const mediaStream = new MediaStream([clonedTrack]);
+              const source = audioContextRef.current!.createMediaStreamSource(mediaStream);
+              const analyser = audioContextRef.current!.createAnalyser();
+              analyser.fftSize = 256;
+              analyser.smoothingTimeConstant = 0.8;
+              analyser.minDecibels = -90;
+              analyser.maxDecibels = -10;
+              source.connect(analyser);
+              remoteAnalysersRef.current[participant.id] = analyser;
+            }
+          }
+        });
+      }
 
       // Start monitoring loop
       updateAudioLevels();
@@ -203,12 +256,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   }, [actualMicEnabled, remoteParticipants, showAudioControls, localMedia.state.localStream]);
 
   const updateAudioLevels = useCallback(() => {
-    if (!showAudioControls) {
-      // Stop monitoring if audio controls are hidden
-      cleanupAudioMonitoring();
-      return;
-    }
-
     const now = Date.now();
     const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
     
@@ -218,8 +265,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     let localLevel = lastLocalLevelRef.current;
     const newRemoteLevels = { ...lastRemoteLevelsRef.current };
     
-    // Calculate local audio level
-    if (localAnalyserRef.current) {
+    // Always calculate local audio level for the indicator, but only if not muted
+    if (localAnalyserRef.current && actualMicEnabled) {
       const bufferLength = localAnalyserRef.current.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
       localAnalyserRef.current.getByteFrequencyData(dataArray);
@@ -227,32 +274,41 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       // Use frequency data instead of time domain for better audio level detection
       const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
       localLevel = Math.min(Math.round(average * 1.5), 100); // Scale appropriately
+    } else if (!actualMicEnabled) {
+      // Force audio level to 0 when muted
+      localLevel = 0;
     }
 
-    // Calculate remote audio levels
-    Object.entries(remoteAnalysersRef.current).forEach(([participantId, analyser]) => {
-      const bufferLength = analyser.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteFrequencyData(dataArray);
-      
-      const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
-      const level = Math.min(Math.round(average * 1.5), 100);
-      newRemoteLevels[participantId] = level;
-    });
+    // Only calculate remote audio levels when the panel is open
+    if (showAudioControls) {
+      Object.entries(remoteAnalysersRef.current).forEach(([participantId, analyser]) => {
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(dataArray);
+        
+        const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
+        const level = Math.min(Math.round(average * 1.5), 100);
+        newRemoteLevels[participantId] = level;
+      });
+    }
 
     // Only update state if enough time has passed AND there's a meaningful change
     if (shouldUpdate) {
       const localLevelChanged = Math.abs(localLevel - lastLocalLevelRef.current) >= 5;
-      const remoteLevelsChanged = Object.keys(newRemoteLevels).some(
+      const remoteLevelsChanged = showAudioControls && Object.keys(newRemoteLevels).some(
         participantId => Math.abs(newRemoteLevels[participantId] - (lastRemoteLevelsRef.current[participantId] || 0)) >= 5
       );
       
       if (localLevelChanged || remoteLevelsChanged) {
         setLocalAudioLevel(localLevel);
-        setRemoteAudioLevels(newRemoteLevels);
+        if (showAudioControls) {
+          setRemoteAudioLevels(newRemoteLevels);
+        }
         lastUpdateTimeRef.current = now;
         lastLocalLevelRef.current = localLevel;
-        lastRemoteLevelsRef.current = newRemoteLevels;
+        if (showAudioControls) {
+          lastRemoteLevelsRef.current = newRemoteLevels;
+        }
       }
     }
 
@@ -365,8 +421,21 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   useEffect(() => {
     if (state.connectionStatus === 'connected' && localParticipant && localParticipant.stream) {
       console.log('✅ Connection successful with media stream');
+      
+      // Detect potential multiple tab scenario
+      const sameBrowserParticipants = remoteParticipants.filter(p => 
+        p.displayName === displayName || p.displayName === localParticipant.displayName
+      );
+      
+      if (sameBrowserParticipants.length > 0) {
+        console.warn('⚠️ Multiple tabs detected with same user name - this may cause audio feedback!');
+        console.warn('💡 Tip: Mute microphone in all but one tab to prevent echo');
+        setShowFeedbackWarning(true);
+        // Auto-hide warning after 10 seconds
+        setTimeout(() => setShowFeedbackWarning(false), 10000);
+      }
     }
-  }, [state.connectionStatus, localParticipant?.stream]);
+  }, [state.connectionStatus, localParticipant?.stream, remoteParticipants.length, displayName]);
 
   // Auto-join room when connection is ready
   useEffect(() => {
@@ -421,9 +490,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     loadSpeakerDevices();
   }, []);
 
-  // Setup audio monitoring only when explicitly requested
+  // Setup audio monitoring when connected (always for local, conditionally for remote)
   useEffect(() => {
-    if (showAudioControls && state.connectionStatus === 'connected') {
+    if (state.connectionStatus === 'connected' && localMedia.state.localStream) {
       setupAudioMonitoring();
     } else {
       cleanupAudioMonitoring();
@@ -432,7 +501,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return () => {
       cleanupAudioMonitoring();
     };
-  }, [showAudioControls, state.connectionStatus, setupAudioMonitoring, cleanupAudioMonitoring]);
+  }, [state.connectionStatus, localMedia.state.localStream, actualMicEnabled, showAudioControls, remoteParticipants.length, setupAudioMonitoring, cleanupAudioMonitoring]);
 
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
@@ -499,7 +568,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
-      <div className="backdrop-blur-xl bg-white/10 rounded-3xl p-8 shadow-2xl border border-white/20 w-full max-w-6xl">
+      <div className={`backdrop-blur-xl bg-white/10 rounded-3xl shadow-2xl border border-white/20 w-full ${
+        totalParticipants > 6 ? 'max-w-7xl p-4' : totalParticipants > 4 ? 'max-w-6xl p-6' : 'max-w-6xl p-8'
+      }`}>
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-4">Video Call</h1>
           <p className="text-blue-200">Welcome, {displayName}!</p>
@@ -521,66 +592,87 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
           </div>
         )}
 
+        {/* Audio Feedback Warning */}
+        {showFeedbackWarning && (
+          <div className="mb-4 p-4 bg-yellow-500/20 border border-yellow-500/40 rounded-xl backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              <div className="text-yellow-400 text-xl">⚠️</div>
+              <div>
+                <div className="text-yellow-100 font-medium">Multiple tabs detected!</div>
+                <div className="text-yellow-200 text-sm">
+                  Mute your microphone in all but one tab to prevent audio feedback and echo.
+                </div>
+              </div>
+              <button
+                onClick={() => setShowFeedbackWarning(false)}
+                className="text-yellow-300 hover:text-yellow-100 ml-auto"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {(state.connectionStatus === 'connected' || state.connectionStatus === 'ready') && (
           <>
             {/* Video Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-              {/* Local Participant */}
-              {localParticipant?.stream && (
-                <div className="relative">
-                  <div className="rounded-2xl overflow-hidden bg-gray-900/50 aspect-video">
-                    <VideoView 
-                      stream={localParticipant.stream} 
-                      muted 
-                      className="w-full h-full object-cover"
-                    />
-                    {/* Dynamic Audio Indicator */}
-                    {actualMicEnabled && (
-                      <div className="absolute top-4 right-4">
-                        <div className="flex items-center gap-2 bg-green-500/80 backdrop-blur-sm rounded-full px-3 py-1.5">
-                          <div className="flex items-center gap-1">
-                            <div className="w-1 h-2 bg-white rounded-full" style={{
-                              opacity: localAudioLevel > 20 ? 1 : 0.3,
-                              transform: `scaleY(${Math.min(localAudioLevel / 50, 1)})`
-                            }}></div>
-                            <div className="w-1 h-3 bg-white rounded-full" style={{
-                              opacity: localAudioLevel > 40 ? 1 : 0.3,
-                              transform: `scaleY(${Math.min(localAudioLevel / 40, 1)})`
-                            }}></div>
-                            <div className="w-1 h-4 bg-white rounded-full" style={{
-                              opacity: localAudioLevel > 60 ? 1 : 0.3,
-                              transform: `scaleY(${Math.min(localAudioLevel / 30, 1)})`
-                            }}></div>
+            <div className={getGridClasses()}>
+                              {/* Local Participant */}
+                {localParticipant?.stream && (
+                  <div className="relative">
+                    <div className={`rounded-2xl overflow-hidden bg-gray-900/50 ${getVideoClasses()}`}>
+                      <VideoView 
+                        stream={localParticipant.stream} 
+                        muted 
+                        className="w-full h-full object-cover"
+                      />
+                                          {/* Dynamic Audio Indicator */}
+                      {actualMicEnabled && (
+                        <div className="absolute top-2 right-2">
+                          <div className={`flex items-center gap-1 bg-green-500/80 backdrop-blur-sm rounded-full ${getAudioIndicatorSize()}`}>
+                            <div className="flex items-center gap-1">
+                              <div className="w-1 h-2 bg-white rounded-full" style={{
+                                opacity: localAudioLevel > 20 ? 1 : 0.3,
+                                transform: `scaleY(${Math.min(localAudioLevel / 50, 1)})`
+                              }}></div>
+                              <div className="w-1 h-3 bg-white rounded-full" style={{
+                                opacity: localAudioLevel > 40 ? 1 : 0.3,
+                                transform: `scaleY(${Math.min(localAudioLevel / 40, 1)})`
+                              }}></div>
+                              <div className="w-1 h-4 bg-white rounded-full" style={{
+                                opacity: localAudioLevel > 60 ? 1 : 0.3,
+                                transform: `scaleY(${Math.min(localAudioLevel / 30, 1)})`
+                              }}></div>
+                            </div>
+                            <Mic className="w-3 h-3 text-white" />
+                            <span className="text-white">{localAudioLevel}%</span>
                           </div>
-                          <Mic className="w-4 h-4 text-white" />
-                          <span className="text-xs text-white">{localAudioLevel}%</span>
+                        </div>
+                      )}
+                      <div className="absolute bottom-2 left-2 right-2">
+                        <div className={`backdrop-blur-sm bg-black/30 rounded-lg ${getNameDisplaySize()}`}>
+                          <div className="text-white truncate">
+                            You ({localParticipant.displayName || displayName || 'Unknown'})
+                          </div>
                         </div>
                       </div>
-                    )}
-                    <div className="absolute bottom-4 left-4 right-4">
-                      <div className="backdrop-blur-sm bg-black/30 rounded-lg px-3 py-2">
-                        <div className="text-white text-sm">
-                          You ({localParticipant.displayName || displayName || 'Unknown'})
-                        </div>
-                      </div>
-                    </div>
                   </div>
                 </div>
               )}
 
               {/* Remote Participants */}
               {remoteParticipants.map((participant) => {
-                return (
-                  <div key={participant.id} className="relative">
-                    <div className="rounded-2xl overflow-hidden bg-gray-900/50 aspect-video">
-                      {participant.stream ? (
-                        <>
-                          <VideoView 
-                            stream={participant.stream} 
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute top-2 left-2 bg-blue-500/80 text-white text-xs px-2 py-1 rounded">
-                            Remote: {participant.displayName}
+                                  return (
+                    <div key={participant.id} className="relative">
+                      <div className={`rounded-2xl overflow-hidden bg-gray-900/50 ${getVideoClasses()}`}>
+                        {participant.stream ? (
+                          <>
+                            <VideoView 
+                              stream={participant.stream} 
+                              className="w-full h-full object-cover"
+                            />
+                          <div className={`absolute top-1 left-1 bg-blue-500/80 text-white rounded ${getNameDisplaySize()}`}>
+                            {totalParticipants > 6 ? participant.displayName?.[0]?.toUpperCase() || '?' : `Remote: ${participant.displayName}`}
                           </div>
                         </>
                       ) : (
@@ -598,8 +690,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       )}
                       {/* Dynamic Audio Indicator for Remote Participants */}
                       {participant.isAudioEnabled && (
-                        <div className="absolute top-4 right-4">
-                          <div className="flex items-center gap-2 bg-blue-500/80 backdrop-blur-sm rounded-full px-3 py-1.5">
+                        <div className="absolute top-2 right-2">
+                          <div className={`flex items-center gap-1 bg-blue-500/80 backdrop-blur-sm rounded-full ${getAudioIndicatorSize()}`}>
                             <div className="flex items-center gap-1">
                               {(() => {
                                 const level = remoteAudioLevels[participant.id] || 0;
@@ -621,14 +713,14 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                                 );
                               })()}
                             </div>
-                            <Mic className="w-4 h-4 text-white" />
-                            <span className="text-xs text-white">{remoteAudioLevels[participant.id] || 0}%</span>
+                            <Mic className="w-3 h-3 text-white" />
+                            <span className="text-white">{remoteAudioLevels[participant.id] || 0}%</span>
                           </div>
                         </div>
                       )}
-                      <div className="absolute bottom-4 left-4 right-4">
-                        <div className="backdrop-blur-sm bg-black/30 rounded-lg px-3 py-2">
-                          <div className="text-white text-sm">
+                      <div className="absolute bottom-2 left-2 right-2">
+                        <div className={`backdrop-blur-sm bg-black/30 rounded-lg ${getNameDisplaySize()}`}>
+                          <div className="text-white truncate">
                             {participant.displayName || 'Unknown'}
                           </div>
                         </div>
@@ -638,10 +730,10 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 );
               })}
 
-              {/* Empty state for no remote participants */}
-              {remoteParticipants.length === 0 && localParticipant?.stream && (
-                <div className="relative">
-                  <div className="rounded-2xl overflow-hidden bg-gray-900/50 aspect-video flex items-center justify-center">
+                              {/* Empty state for no remote participants */}
+                {remoteParticipants.length === 0 && localParticipant?.stream && (
+                  <div className="relative">
+                    <div className={`rounded-2xl overflow-hidden bg-gray-900/50 ${getVideoClasses()} flex items-center justify-center`}>
                     <div className="text-center text-white">
                       <div className="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center mx-auto mb-4">
                         <span className="text-2xl">👥</span>
@@ -657,23 +749,71 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             {/* Controls */}
             <div className="flex justify-center gap-4 mb-6">
               <button
-                onClick={() => {
+                onClick={async () => {
                   try {
+                    const wasEnabled = actualMicEnabled;
+                    console.log(`🎤 Toggling microphone: ${wasEnabled ? 'muting' : 'unmuting'}`);
+                    
+                    // 1. Use Whereby's toggle first
                     actions.toggleMicrophone();
+                    
+                    // 2. Additional safeguard: directly control stream tracks
+                    if (localParticipant?.stream) {
+                      const audioTracks = localParticipant.stream.getAudioTracks();
+                      console.log(`🔍 Found ${audioTracks.length} audio tracks in localParticipant stream`);
+                      audioTracks.forEach((track, index) => {
+                        const newState = !wasEnabled;
+                        track.enabled = newState;
+                        console.log(`🎛️ Track ${index}: ${track.label || track.id} -> enabled: ${newState}`);
+                      });
+                    }
+                    
+                    // 3. Also control localMedia stream tracks
+                    if (localMedia.state.localStream) {
+                      const localAudioTracks = localMedia.state.localStream.getAudioTracks();
+                      console.log(`🔍 Found ${localAudioTracks.length} audio tracks in localMedia stream`);
+                      localAudioTracks.forEach((track, index) => {
+                        const newState = !wasEnabled;
+                        track.enabled = newState;
+                        console.log(`🎛️ LocalMedia Track ${index}: ${track.label || track.id} -> enabled: ${newState}`);
+                      });
+                    }
+                    
+                    // 4. Verify the mute state after a short delay
+                    setTimeout(() => {
+                      const currentState = localParticipant?.isAudioEnabled ?? true;
+                      const streamState = localParticipant?.stream?.getAudioTracks().every(t => t.enabled) ?? false;
+                      
+                      console.log(`✅ Mute verification:`);
+                      console.log(`   - Whereby state: ${currentState ? 'unmuted' : 'muted'}`);
+                      console.log(`   - Stream tracks: ${streamState ? 'enabled' : 'disabled'}`);
+                      console.log(`   - Expected: ${!wasEnabled ? 'unmuted' : 'muted'}`);
+                      
+                      if (currentState === !wasEnabled) {
+                        console.log(`🎉 Mute toggle successful!`);
+                      } else {
+                        console.warn(`⚠️ Mute state mismatch - may need manual verification`);
+                      }
+                    }, 100);
+                    
                   } catch (error) {
                     console.error('❌ Error toggling microphone:', error);
                   }
                 }}
-                className={`p-4 rounded-full transition-all duration-200 ${
+                className={`p-4 rounded-full transition-all duration-200 relative ${
                   actualMicEnabled 
                     ? 'bg-green-500 hover:bg-green-600' 
-                    : 'bg-red-500 hover:bg-red-600'
+                    : 'bg-red-500 hover:bg-red-600 ring-2 ring-red-300'
                 }`}
+                title={actualMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
               >
                 {actualMicEnabled ? (
                   <Mic className="w-6 h-6 text-white" />
                 ) : (
-                  <MicOff className="w-6 h-6 text-white" />
+                  <>
+                    <MicOff className="w-6 h-6 text-white" />
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
+                  </>
                 )}
               </button>
 
@@ -918,6 +1058,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               <p><strong>Audio Enabled (Actual):</strong> {actualMicEnabled ? 'yes' : 'no'}</p>
               <p><strong>Video Enabled (Whereby):</strong> {localParticipant?.isVideoEnabled ? 'yes' : 'no'}</p>
               <p><strong>Video Enabled (Actual):</strong> {actualVideoEnabled ? 'yes' : 'no'}</p>
+              {localParticipant?.stream && (
+                <p><strong>Stream Audio Tracks Enabled:</strong> {
+                  localParticipant.stream.getAudioTracks().map(t => t.enabled).join(', ') || 'none'
+                }</p>
+              )}
+              <p><strong>Local Audio Level:</strong> {localAudioLevel}%</p>
               <p><strong>Has Stream:</strong> {localParticipant?.stream ? 'yes' : 'no'}</p>
               <p><strong>Remote Participants:</strong> {remoteParticipants.length}</p>
               <p><strong>Chat Messages:</strong> {state.chatMessages.length}</p>
