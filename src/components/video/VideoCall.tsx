@@ -1073,47 +1073,11 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                             console.log(`🔍 After Whereby toggle - Audio still enabled: ${isStillEnabled}`);
                             
                             if (isStillEnabled) {
-                              console.warn(`⚠️ Whereby toggle failed, trying again`);
-                              actions.toggleMicrophone();
+                              console.warn(`⚠️ Whereby toggle failed - tracks are stopped, that should be enough`);
                             }
                           }, 100);
-                        }
-                        
-                        // NUCLEAR OPTION: Remove audio from the WebRTC sender if available
-                        try {
-                          // Access the underlying WebRTC connection if possible
-                          if (localParticipant?.stream) {
-                            const stream = localParticipant.stream;
-                            
-                            // Create an empty audio track as replacement
-                            const audioContext = new AudioContext();
-                            const oscillator = audioContext.createOscillator();
-                            const dest = audioContext.createMediaStreamDestination();
-                            oscillator.connect(dest);
-                            oscillator.start();
-                            oscillator.stop(); // Immediately stop to create silence
-                            
-                            const silentTrack = dest.stream.getAudioTracks()[0];
-                            
-                            // Replace all audio tracks with silent track
-                            const audioTracks = stream.getAudioTracks();
-                            audioTracks.forEach(track => {
-                              try {
-                                stream.removeTrack(track);
-                                console.log(`🔇 Removed audio track: ${track.label}`);
-                              } catch (e) {
-                                console.warn('Failed to remove track:', e);
-                              }
-                            });
-                            
-                            // Add the silent track
-                            stream.addTrack(silentTrack);
-                            console.log(`🔇 Added silent audio track`);
-                            
-                            audioContext.close();
-                          }
-                        } catch (error) {
-                          console.warn('Failed to apply nuclear audio muting:', error);
+                        } else {
+                          console.log(`🔇 Whereby already shows muted or toggle not available`);
                         }
                         
                       } catch (error) {
@@ -1134,54 +1098,41 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                             actions.toggleMicrophone();
                           }
                           
-                          // STEP 2: Force recreate microphone stream
-                          const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || devicePreferences.microphoneDeviceId || 'default';
-                          console.log(`🔄 Force recreating microphone stream with device: ${currentMicDevice}`);
+                          // STEP 2: Let Whereby handle stream recreation
+                          // Wait for Whereby to process the toggle
+                          await new Promise(resolve => setTimeout(resolve, 200));
                           
-                          try {
-                            // Force a device "change" to the same device to recreate the stream
-                            if (localMedia.actions.setMicrophoneDevice) {
-                              await localMedia.actions.setMicrophoneDevice(currentMicDevice);
-                              console.log(`🎤 Microphone stream recreated with device: ${currentMicDevice}`);
-                            }
-                          } catch (deviceError) {
-                            console.warn(`⚠️ Device reset failed, trying getUserMedia directly:`, deviceError);
-                            
-                            // Fallback: Try to get a new media stream directly
+                          // Check if Whereby recreated streams properly
+                          const hasWorkingAudio = [
+                            ...(localParticipant?.stream?.getAudioTracks() || []),
+                            ...(localMedia.state.localStream?.getAudioTracks() || [])
+                          ].some(track => track.enabled && track.readyState === 'live' && track.label !== 'MediaStreamAudioDestinationNode');
+                          
+                          if (!hasWorkingAudio) {
+                            console.log(`🔄 No working audio found, forcing device refresh`);
+                            // Only use setMicrophoneDevice to refresh, let Whereby handle the rest
+                            const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || devicePreferences.microphoneDeviceId || 'default';
                             try {
-                              const newStream = await navigator.mediaDevices.getUserMedia({ 
-                                audio: currentMicDevice !== 'default' 
-                                  ? { deviceId: { exact: currentMicDevice } }
-                                  : true,
-                                video: false 
-                              });
-                              
-                              const newAudioTrack = newStream.getAudioTracks()[0];
-                              if (newAudioTrack && localParticipant?.stream) {
-                                // Replace the audio track in the participant stream
-                                const oldAudioTracks = localParticipant.stream.getAudioTracks();
-                                oldAudioTracks.forEach(track => {
-                                  localParticipant.stream?.removeTrack(track);
-                                  track.stop();
-                                });
-                                
-                                localParticipant.stream.addTrack(newAudioTrack);
-                                console.log(`🎤 Manually added new audio track: ${newAudioTrack.label}`);
+                              if (localMedia.actions.setMicrophoneDevice) {
+                                await localMedia.actions.setMicrophoneDevice(currentMicDevice);
+                                console.log(`🎤 Device refreshed: ${currentMicDevice}`);
                               }
-                            } catch (mediaError) {
-                              console.error(`❌ Failed to recreate audio stream:`, mediaError);
+                            } catch (error) {
+                              console.warn(`⚠️ Device refresh failed:`, error);
                             }
+                          } else {
+                            console.log(`✅ Audio tracks look good after unmuting`);
                           }
                           
                           // STEP 3: Update our state and restart monitoring
                           setIsDirectlyMuted(false);
                           
-                          // Wait and verify audio tracks are working
+                          // STEP 3: Wait and verify audio tracks are working
                           setTimeout(() => {
                             const workingTracks = [
                               ...(localParticipant?.stream?.getAudioTracks() || []),
                               ...(localMedia.state.localStream?.getAudioTracks() || [])
-                            ].filter(track => track.enabled && track.readyState === 'live');
+                            ].filter(track => track.enabled && track.readyState === 'live' && track.label !== 'MediaStreamAudioDestinationNode');
                             
                             console.log(`🔍 Audio recovery check: ${workingTracks.length} working tracks found`);
                             workingTracks.forEach((track, i) => {
@@ -1193,19 +1144,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                               console.log(`✅ Audio monitoring restarted successfully`);
                             } else {
                               console.error(`❌ Audio recovery failed - no working tracks`);
-                              
-                              // Last resort: Try a complete audio restart
-                              console.log(`🔄 Attempting complete audio restart...`);
-                              setTimeout(async () => {
-                                try {
-                                  if (localMedia.actions.setMicrophoneDevice) {
-                                    await localMedia.actions.setMicrophoneDevice(currentMicDevice);
-                                    console.log(`🎤 Complete restart attempted`);
-                                  }
-                                } catch (e) {
-                                  console.error(`❌ Complete restart failed:`, e);
-                                }
-                              }, 500);
                             }
                           }, 500);
                           
