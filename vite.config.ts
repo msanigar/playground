@@ -12,7 +12,7 @@ export default defineConfig({
   },
   build: {
     rollupOptions: {
-      external: ['rtcstats'],
+      // Remove rtcstats from external - let it be bundled
     },
   },
   define: {
