@@ -203,13 +203,22 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       }
 
       // Always monitor local audio for the indicator (use a separate stream to avoid conflicts)
+      // But only if microphone is actually enabled AND tracks are enabled
       if (actualMicEnabled && localMedia.state.localStream) {
         const audioTracks = localMedia.state.localStream.getAudioTracks();
         
-        if (audioTracks.length > 0 && audioTracks[0].enabled && audioTracks[0].readyState === 'live') {
+        // Double-check that tracks are actually enabled and live
+        const enabledTracks = audioTracks.filter(track => 
+          track.enabled && track.readyState === 'live' && !track.muted
+        );
+        
+        if (enabledTracks.length > 0) {
           try {
-            // Clone the track to avoid conflicts
-            const clonedTrack = audioTracks[0].clone();
+            // Clone the track to avoid conflicts - use the first enabled track
+            const clonedTrack = enabledTracks[0].clone();
+            // Ensure the cloned track is also enabled
+            clonedTrack.enabled = true;
+            
             const mediaStream = new MediaStream([clonedTrack]);
             const source = audioContextRef.current.createMediaStreamSource(mediaStream);
             localAnalyserRef.current = audioContextRef.current.createAnalyser();
@@ -218,12 +227,18 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             localAnalyserRef.current.minDecibels = -90;
             localAnalyserRef.current.maxDecibels = -10;
             source.connect(localAnalyserRef.current);
+            
+            console.log(`🎤 Audio monitoring setup: using track ${enabledTracks[0].label || enabledTracks[0].id}`);
           } catch (error) {
             console.warn('Failed to setup local audio monitoring:', error);
+            setLocalAudioLevel(0);
           }
+        } else {
+          console.log(`🔇 No enabled audio tracks found - skipping monitoring`);
+          setLocalAudioLevel(0);
         }
       } else {
-        // Clear local audio level when muted
+        // Clear local audio level when muted or no stream
         setLocalAudioLevel(0);
       }
 
@@ -621,11 +636,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 {localParticipant?.stream && (
                   <div className="relative">
                     <div className={`rounded-2xl overflow-hidden bg-gray-900/50 ${getVideoClasses()}`}>
-                      <VideoView 
-                        stream={localParticipant.stream} 
-                        muted 
-                        className="w-full h-full object-cover"
-                      />
+                                          <VideoView 
+                      stream={localParticipant.stream} 
+                      muted={true}
+                      playsInline={true}
+                      className="w-full h-full object-cover"
+                    />
                                           {/* Dynamic Audio Indicator */}
                       {actualMicEnabled && (
                         <div className="absolute top-2 right-2">
@@ -754,10 +770,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                     const wasEnabled = actualMicEnabled;
                     console.log(`🎤 Toggling microphone: ${wasEnabled ? 'muting' : 'unmuting'}`);
                     
-                    // 1. Use Whereby's toggle first
-                    actions.toggleMicrophone();
-                    
-                    // 2. Additional safeguard: directly control stream tracks
+                    // 1. First, directly control stream tracks to ensure immediate muting
                     if (localParticipant?.stream) {
                       const audioTracks = localParticipant.stream.getAudioTracks();
                       console.log(`🔍 Found ${audioTracks.length} audio tracks in localParticipant stream`);
@@ -768,7 +781,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       });
                     }
                     
-                    // 3. Also control localMedia stream tracks
+                    // 2. Control localMedia stream tracks
                     if (localMedia.state.localStream) {
                       const localAudioTracks = localMedia.state.localStream.getAudioTracks();
                       console.log(`🔍 Found ${localAudioTracks.length} audio tracks in localMedia stream`);
@@ -779,22 +792,62 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       });
                     }
                     
-                    // 4. Verify the mute state after a short delay
+                    // 3. Stop audio monitoring immediately when muting to prevent feedback
+                    if (!wasEnabled) {
+                      // Unmuting - setup monitoring
+                      setTimeout(() => setupAudioMonitoring(), 200);
+                    } else {
+                      // Muting - stop monitoring immediately
+                      cleanupAudioMonitoring();
+                      setLocalAudioLevel(0);
+                    }
+                    
+                    // 4. Use Whereby's toggle (with a small delay to let track changes settle)
+                    setTimeout(() => {
+                      actions.toggleMicrophone();
+                    }, 50);
+                    
+                    // 5. Verify the mute state after allowing time for Whereby to sync
                     setTimeout(() => {
                       const currentState = localParticipant?.isAudioEnabled ?? true;
                       const streamState = localParticipant?.stream?.getAudioTracks().every(t => t.enabled) ?? false;
+                      const localStreamState = localMedia.state.localStream?.getAudioTracks().every(t => t.enabled) ?? false;
                       
                       console.log(`✅ Mute verification:`);
                       console.log(`   - Whereby state: ${currentState ? 'unmuted' : 'muted'}`);
                       console.log(`   - Stream tracks: ${streamState ? 'enabled' : 'disabled'}`);
+                      console.log(`   - LocalMedia tracks: ${localStreamState ? 'enabled' : 'disabled'}`);
                       console.log(`   - Expected: ${!wasEnabled ? 'unmuted' : 'muted'}`);
+                      console.log(`   - Audio level: ${localAudioLevel}%`);
                       
-                      if (currentState === !wasEnabled) {
+                      // Check if we need to force mute again
+                      if (wasEnabled && (currentState || streamState || localStreamState)) {
+                        console.warn(`🔄 Forcing additional mute due to state mismatch`);
+                        
+                        // Force mute all tracks again
+                        if (localParticipant?.stream) {
+                          localParticipant.stream.getAudioTracks().forEach(track => {
+                            track.enabled = false;
+                          });
+                        }
+                        if (localMedia.state.localStream) {
+                          localMedia.state.localStream.getAudioTracks().forEach(track => {
+                            track.enabled = false;
+                          });
+                        }
+                        
+                        // Try Whereby toggle again if needed
+                        if (currentState) {
+                          setTimeout(() => actions.toggleMicrophone(), 100);
+                        }
+                      }
+                      
+                      if (currentState === !wasEnabled && !streamState === wasEnabled && !localStreamState === wasEnabled) {
                         console.log(`🎉 Mute toggle successful!`);
                       } else {
-                        console.warn(`⚠️ Mute state mismatch - may need manual verification`);
+                        console.warn(`⚠️ Mute state mismatch detected - check for audio feedback sources`);
                       }
-                    }, 100);
+                    }, 300);
                     
                   } catch (error) {
                     console.error('❌ Error toggling microphone:', error);
