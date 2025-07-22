@@ -188,6 +188,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return totalParticipants > 6 ? "text-xs px-2 py-1" : "text-sm px-3 py-2";
   };
 
+
+
   // Audio monitoring functions - simplified to avoid interference
   const setupAudioMonitoring = useCallback(() => {
     try {
@@ -445,10 +447,69 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       
       if (sameBrowserParticipants.length > 0) {
         console.warn('⚠️ Multiple tabs detected with same user name - this may cause audio feedback!');
-        console.warn('💡 Tip: Mute microphone in all but one tab to prevent echo');
+        console.warn('💡 Tip: This tab will disable microphone publishing to prevent feedback');
         setShowFeedbackWarning(true);
+        
+        // Instead of just muting tracks, completely disable microphone at the Whereby level
+        if (!isDirectlyMuted) {
+          console.log('🚫 Auto-disabling microphone publishing due to multiple tabs');
+          setIsDirectlyMuted(true);
+          
+          // Stop all audio tracks AND disable Whereby's audio publishing
+          try {
+            // First, stop all local audio tracks completely
+            if (localParticipant?.stream) {
+              localParticipant.stream.getAudioTracks().forEach(track => {
+                track.enabled = false;
+                track.stop();
+              });
+            }
+            if (localMedia.state.localStream) {
+              localMedia.state.localStream.getAudioTracks().forEach(track => {
+                track.enabled = false;
+                track.stop();
+              });
+            }
+            
+            // Then tell Whereby to stop publishing audio completely
+            if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
+              actions.toggleMicrophone();
+            }
+            
+            // Force cleanup of audio monitoring
+            cleanupAudioMonitoring();
+            setLocalAudioLevel(0);
+            
+            console.log('🚫 Microphone publishing completely disabled for this tab');
+          } catch (error) {
+            console.error('Error disabling microphone publishing:', error);
+          }
+        }
+        
         // Auto-hide warning after 10 seconds
         setTimeout(() => setShowFeedbackWarning(false), 10000);
+      } else {
+        // No duplicates detected, re-enable microphone if it was auto-disabled
+        if (isDirectlyMuted && sameBrowserParticipants.length === 0) {
+          console.log('🔊 Re-enabling microphone publishing - no duplicates detected');
+          setIsDirectlyMuted(false);
+          
+          // Re-enable Whereby's audio publishing
+          try {
+            if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) {
+              actions.toggleMicrophone();
+            }
+            
+            // Restart audio monitoring after a delay
+            setTimeout(() => {
+              setupAudioMonitoring();
+            }, 500);
+            
+            console.log('🎤 Microphone publishing re-enabled');
+          } catch (error) {
+            console.error('Error re-enabling microphone publishing:', error);
+          }
+        }
       }
     }
   }, [state.connectionStatus, localParticipant?.stream, remoteParticipants.length, displayName]);
@@ -616,15 +677,53 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
           <div className="mb-4 p-4 bg-yellow-500/20 border border-yellow-500/40 rounded-xl backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <div className="text-yellow-400 text-xl">⚠️</div>
-              <div>
+              <div className="flex-1">
                 <div className="text-yellow-100 font-medium">Multiple tabs detected!</div>
                 <div className="text-yellow-200 text-sm">
-                  Mute your microphone in all but one tab to prevent audio feedback and echo.
+                  {isDirectlyMuted 
+                    ? "Microphone publishing disabled in this tab to prevent feedback." 
+                    : "Microphone publishing will be disabled automatically to prevent feedback."
+                  }
                 </div>
               </div>
               <button
+                onClick={() => {
+                  if (isDirectlyMuted) {
+                    // Manually re-enable microphone
+                    setIsDirectlyMuted(false);
+                    if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) {
+                      actions.toggleMicrophone();
+                    }
+                    setTimeout(() => setupAudioMonitoring(), 500);
+                    console.log('🎤 Manually re-enabled microphone publishing');
+                  } else {
+                    // Manually disable microphone
+                    setIsDirectlyMuted(true);
+                    if (localParticipant?.stream) {
+                      localParticipant.stream.getAudioTracks().forEach(track => {
+                        track.enabled = false;
+                        track.stop();
+                      });
+                    }
+                    if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
+                      actions.toggleMicrophone();
+                    }
+                    cleanupAudioMonitoring();
+                    setLocalAudioLevel(0);
+                    console.log('🚫 Manually disabled microphone publishing');
+                  }
+                }}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors mr-2 ${
+                  isDirectlyMuted 
+                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                    : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                {isDirectlyMuted ? '🚫 Mic Publishing Off' : '🎤 Mic Publishing On'}
+              </button>
+              <button
                 onClick={() => setShowFeedbackWarning(false)}
-                className="text-yellow-300 hover:text-yellow-100 ml-auto"
+                className="text-yellow-300 hover:text-yellow-100"
               >
                 ✕
               </button>
