@@ -67,7 +67,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         // Use Whereby's built-in chat system
         if (actions.sendChatMessage) {
           actions.sendChatMessage(chatInput.trim());
-          console.log('📤 Sent chat message via Whereby:', chatInput.trim());
         } else {
           console.warn('sendChatMessage action not available');
         }
@@ -145,8 +144,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       // Cleanup previous monitoring
       cleanupAudioMonitoring();
       
-      console.log('🎤 Setting up simplified audio monitoring...');
-      
       // Only set up audio monitoring if explicitly enabled
       if (!showAudioControls) {
         return;
@@ -164,7 +161,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       // Monitor local audio - use a separate stream to avoid conflicts
       if (actualMicEnabled && localMedia.state.localStream) {
         const audioTracks = localMedia.state.localStream.getAudioTracks();
-        console.log(`🎵 Found ${audioTracks.length} local audio tracks for monitoring`);
         
         if (audioTracks.length > 0 && audioTracks[0].enabled) {
           // Clone the track to avoid conflicts
@@ -177,7 +173,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
           localAnalyserRef.current.minDecibels = -90;
           localAnalyserRef.current.maxDecibels = -10;
           source.connect(localAnalyserRef.current);
-          console.log(`✅ Local audio monitoring connected (non-interfering)`);
         }
       }
 
@@ -196,7 +191,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             analyser.maxDecibels = -10;
             source.connect(analyser);
             remoteAnalysersRef.current[participant.id] = analyser;
-            console.log(`✅ Remote audio monitoring connected for ${participant.displayName} (non-interfering)`);
           }
         }
       });
@@ -336,15 +330,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     // Wait for devices to be available
     if (cameraDevices.length === 0 || microphoneDevices.length === 0) return;
     
-    console.log('🔧 Setting initial preferred devices...');
-    
     let deviceChangeNeeded = false;
     
     // Set preferred camera if available and different from current
     if (cameraDeviceId && 
         cameraDevices.some(device => device.deviceId === cameraDeviceId) &&
         currentCameraDeviceId !== cameraDeviceId) {
-      console.log('📹 Auto-selecting preferred camera:', cameraDeviceId);
       localMedia.actions.setCameraDevice(cameraDeviceId);
       deviceChangeNeeded = true;
     }
@@ -353,13 +344,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     if (microphoneDeviceId && 
         microphoneDevices.some(device => device.deviceId === microphoneDeviceId) &&
         currentMicrophoneDeviceId !== microphoneDeviceId) {
-      console.log('🎤 Auto-selecting preferred microphone:', microphoneDeviceId);
       localMedia.actions.setMicrophoneDevice(microphoneDeviceId);
       deviceChangeNeeded = true;
     }
     
     if (deviceChangeNeeded) {
-      console.log('✅ Initial device selection completed');
+      console.log('✅ Device preferences applied');
     }
     
     setHasSetInitialDevices(true);
@@ -371,74 +361,38 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     devicePreferences.microphoneDeviceId
   ]);
 
-  // Log successful connection with media info
+  // Log successful connection with media info (only once)
   useEffect(() => {
-    if (state.connectionStatus === 'connected' && localParticipant) {
-      console.log('✅ Connection successful! Participant has stream:', !!localParticipant.stream);
-      
-      // Log audio track details for debugging
-      if (localParticipant.stream) {
-        const audioTracks = localParticipant.stream.getAudioTracks();
-        const videoTracks = localParticipant.stream.getVideoTracks();
-        console.log('🎵 Audio tracks:', audioTracks.map(track => ({
-          id: track.id,
-          label: track.label,
-          enabled: track.enabled,
-          muted: track.muted,
-          readyState: track.readyState
-        })));
-        console.log('📹 Video tracks:', videoTracks.map(track => ({
-          id: track.id,
-          label: track.label,
-          enabled: track.enabled,
-          muted: track.muted,
-          readyState: track.readyState
-        })));
-      }
+    if (state.connectionStatus === 'connected' && localParticipant && localParticipant.stream) {
+      console.log('✅ Connection successful with media stream');
     }
   }, [state.connectionStatus, localParticipant?.stream]);
 
   // Auto-join room when connection is ready
   useEffect(() => {
     if (state.connectionStatus === 'ready' && actions.joinRoom) {
-      console.log('🚀 Auto-joining room (status: ready)...');
-      console.log('Debug auto-join conditions:', {
-        connectionStatus: state.connectionStatus,
-        hasJoinRoomAction: !!actions.joinRoom,
-        localParticipant: !!localParticipant,
-        localParticipantStream: !!localParticipant?.stream,
-        localMediaStream: !!localMedia.state.localStream
-      });
+      console.log('🚀 Auto-joining room...');
       
       // Add a small delay to ensure all initialization is complete
       const joinTimer = setTimeout(() => {
         try {
           actions.joinRoom();
-          console.log('✅ Room join initiated successfully');
         } catch (error) {
           console.error('❌ Auto-join failed:', error);
         }
       }, 100);
 
       return () => clearTimeout(joinTimer);
-    } else if (state.connectionStatus === 'ready') {
-      console.log('⚠️ Ready but cannot auto-join:', {
-        connectionStatus: state.connectionStatus,
-        hasJoinRoomAction: !!actions.joinRoom,
-        actionsAvailable: Object.keys(actions)
-      });
     }
   }, [state.connectionStatus]);
 
-  // Test room URL validity
+  // Test room URL validity (silent check)
   useEffect(() => {
     const testRoomUrl = async () => {
       try {
-        console.log('🔍 Testing room URL accessibility...');
         await fetch(roomUrl, { method: 'HEAD', mode: 'no-cors' });
-        console.log('✅ Room URL is accessible');
       } catch (error) {
-        console.log('❌ Room URL test failed:', error);
+        console.warn('Room URL accessibility check failed:', error);
       }
     };
     
@@ -470,7 +424,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Setup audio monitoring only when explicitly requested
   useEffect(() => {
     if (showAudioControls && state.connectionStatus === 'connected') {
-      console.log('🎤 Setting up audio monitoring (on-demand)...');
       setupAudioMonitoring();
     } else {
       cleanupAudioMonitoring();
@@ -484,7 +437,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
     return () => {
-      console.log('🧹 VideoCall cleanup: Stopping all media streams...');
+      console.log('🧹 VideoCall cleanup initiated');
       
       // Cleanup audio monitoring
       cleanupAudioMonitoring();
@@ -497,60 +450,44 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       
       // Stop local media tracks
       if (localParticipant?.stream) {
-        localParticipant.stream.getTracks().forEach(track => {
-          console.log(`🛑 Stopping ${track.kind} track:`, track.id);
-          track.stop();
-        });
+        localParticipant.stream.getTracks().forEach(track => track.stop());
       }
       
       // Also cleanup localMedia streams
       if (localMedia.state.localStream) {
-        localMedia.state.localStream.getTracks().forEach(track => {
-          console.log(`🛑 Stopping localMedia ${track.kind} track:`, track.id);
-          track.stop();
-        });
+        localMedia.state.localStream.getTracks().forEach(track => track.stop());
       }
       
       // Force cleanup by calling any available cleanup actions
       if (actions.leaveRoom) {
         try {
           actions.leaveRoom();
-          console.log('✅ Left room via actions.leaveRoom');
         } catch (error) {
-          console.log('⚠️ Error leaving room:', error);
+          console.warn('Error leaving room during cleanup:', error);
         }
       }
-      
-      console.log('✅ VideoCall cleanup completed');
     };
   }, [cleanupAudioMonitoring]); // Only run cleanup on unmount
 
   // Enhanced leave handler with cleanup
   const handleLeaveWithCleanup = useCallback(() => {
-    console.log('🚪 Leaving call with cleanup...');
+    console.log('🚪 Leaving call...');
     
     // Stop all media tracks immediately
     if (localParticipant?.stream) {
-      localParticipant.stream.getTracks().forEach(track => {
-        console.log(`🛑 Manually stopping ${track.kind} track during leave`);
-        track.stop();
-      });
+      localParticipant.stream.getTracks().forEach(track => track.stop());
     }
     
     if (localMedia.state.localStream) {
-      localMedia.state.localStream.getTracks().forEach(track => {
-        console.log(`🛑 Manually stopping localMedia ${track.kind} track during leave`);
-        track.stop();
-      });
+      localMedia.state.localStream.getTracks().forEach(track => track.stop());
     }
     
     // Leave the room
     if (actions.leaveRoom) {
       try {
         actions.leaveRoom();
-        console.log('✅ Left room successfully');
       } catch (error) {
-        console.log('⚠️ Error leaving room:', error);
+        console.warn('Error leaving room:', error);
       }
     }
     
@@ -633,16 +570,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
               {/* Remote Participants */}
               {remoteParticipants.map((participant) => {
-                // Debug logging for each remote participant
-                console.log('🎭 Rendering remote participant:', {
-                  id: participant.id,
-                  displayName: participant.displayName,
-                  hasStream: !!participant.stream,
-                  streamId: participant.stream?.id,
-                  videoTracks: participant.stream?.getVideoTracks().length || 0,
-                  audioTracks: participant.stream?.getAudioTracks().length || 0
-                });
-                
                 return (
                   <div key={participant.id} className="relative">
                     <div className="rounded-2xl overflow-hidden bg-gray-900/50 aspect-video">
@@ -731,41 +658,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             <div className="flex justify-center gap-4 mb-6">
               <button
                 onClick={() => {
-                  console.log('🎤 Mic button clicked. Current state:', {
-                    wherebyState: localParticipant?.isAudioEnabled,
-                    actualMicEnabled,
-                    hasActions: !!actions.toggleMicrophone,
-                    streamAudioTracks: localParticipant?.stream?.getAudioTracks().length || 0,
-                    currentMicDevice: localMedia.state.currentMicrophoneDeviceId
-                  });
-                  
-                  // Check if we have proper audio tracks before toggling
-                  if (localParticipant?.stream) {
-                    const audioTracks = localParticipant.stream.getAudioTracks();
-                    console.log('🎵 Current audio tracks before toggle:', audioTracks.map(track => ({
-                      id: track.id,
-                      label: track.label,
-                      enabled: track.enabled,
-                      readyState: track.readyState
-                    })));
-                  }
-                  
                   try {
                     actions.toggleMicrophone();
-                    console.log('✅ toggleMicrophone called successfully');
-                    
-                    // Log the result after a short delay
-                    setTimeout(() => {
-                      if (localParticipant?.stream) {
-                        const audioTracks = localParticipant.stream.getAudioTracks();
-                        console.log('🎵 Audio tracks after toggle:', audioTracks.map(track => ({
-                          id: track.id,
-                          label: track.label,
-                          enabled: track.enabled,
-                          readyState: track.readyState
-                        })));
-                      }
-                    }, 100);
                   } catch (error) {
                     console.error('❌ Error toggling microphone:', error);
                   }
@@ -785,16 +679,10 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
               <button
                 onClick={() => {
-                  console.log('Video button clicked. Current state:', {
-                    wherebyState: localParticipant?.isVideoEnabled,
-                    actualVideoEnabled,
-                    hasActions: !!actions.toggleCamera
-                  });
                   try {
                     actions.toggleCamera();
-                    console.log('toggleCamera called successfully');
                   } catch (error) {
-                    console.error('Error toggling camera:', error);
+                    console.error('❌ Error toggling camera:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 ${
@@ -839,7 +727,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                     const deviceId = e.target.value;
                     localMedia.actions.setCameraDevice(deviceId);
                     handleDeviceChange('cameraDeviceId', deviceId);
-                    console.log('Camera changed to:', deviceId);
                   }}
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
                 >
@@ -859,7 +746,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                     const deviceId = e.target.value;
                     localMedia.actions.setMicrophoneDevice(deviceId);
                     handleDeviceChange('microphoneDeviceId', deviceId);
-                    console.log('Microphone changed to:', deviceId);
                   }}
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
                 >
@@ -878,7 +764,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                   onChange={(e) => {
                     const deviceId = e.target.value;
                     handleDeviceChange('speakerDeviceId', deviceId);
-                    console.log('Speaker changed to:', deviceId);
                   }}
                   className="px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none"
                 >

@@ -65,7 +65,6 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
   const handleDeviceChange = (deviceType: keyof DevicePreferences, deviceId: string) => {
     const newPreferences = { ...devicePreferences, [deviceType]: deviceId };
     saveDevicePreferences(newPreferences);
-    console.log(`MediaSetup: Saved ${deviceType}:`, deviceId);
   };
 
   useEffect(() => {
@@ -123,21 +122,18 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
           speakers.find(s => s.deviceId === devicePreferences.speakerDeviceId);
 
         if (preferredCamera) {
-          console.log('MediaSetup: Using saved camera preference:', preferredCamera.label);
           setSelectedCamera(preferredCamera.deviceId);
         } else if (cameras.length > 0) {
           setSelectedCamera(cameras[0].deviceId);
         }
         
         if (preferredMic) {
-          console.log('MediaSetup: Using saved microphone preference:', preferredMic.label);
           setSelectedMicrophone(preferredMic.deviceId);
         } else if (microphones.length > 0) {
           setSelectedMicrophone(microphones[0].deviceId);
         }
         
         if (preferredSpeaker) {
-          console.log('MediaSetup: Using saved speaker preference:', preferredSpeaker.label);
           setSelectedSpeaker(preferredSpeaker.deviceId);
         } else if (speakers.length > 0) {
           setSelectedSpeaker(speakers[0].deviceId);
@@ -152,16 +148,11 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
 
     // Cleanup function
     return () => {
-      console.log('🧹 MediaSetup cleanup: Stopping preview streams...');
       cleanupAudio();
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          console.log(`🛑 Stopping MediaSetup ${track.kind} track:`, track.id);
-          track.stop();
-        });
+        streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
       }
-      console.log('✅ MediaSetup cleanup completed');
     };
   }, []);
 
@@ -245,16 +236,11 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
 
   const handleJoinCall = () => {
     // Clean up preview stream before joining
-    console.log('🚪 MediaSetup: Cleaning up before joining call...');
     cleanupAudio();
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        console.log(`🛑 Stopping preview ${track.kind} track before join:`, track.id);
-        track.stop();
-      });
+      streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    console.log('✅ MediaSetup: Preview cleanup completed, joining call...');
     
     // Add a small delay to ensure streams are fully stopped before Whereby initializes
     setTimeout(() => {
