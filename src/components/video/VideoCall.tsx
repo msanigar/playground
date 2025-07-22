@@ -59,6 +59,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Device preferences
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
+  const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -117,7 +118,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return participantId;
   };
 
-  // Initialize media
+  // Initialize media - we'll set preferred devices after initialization
   const localMedia = useLocalMedia({
     audio: true,
     video: true,
@@ -138,13 +139,18 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
   const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
 
-  // Audio monitoring functions
+  // Audio monitoring functions - simplified to avoid interference
   const setupAudioMonitoring = useCallback(() => {
     try {
       // Cleanup previous monitoring
       cleanupAudioMonitoring();
       
-      console.log('🎤 Setting up audio monitoring...');
+      console.log('🎤 Setting up simplified audio monitoring...');
+      
+      // Only set up audio monitoring if explicitly enabled
+      if (!showAudioControls) {
+        return;
+      }
       
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new AudioContext();
@@ -155,46 +161,42 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         audioContextRef.current.resume();
       }
 
-      // Monitor local audio - use localMedia stream but respect mute state
-      // Only show audio levels when microphone is not muted
-      if (localMedia.state.localStream && actualMicEnabled) {
+      // Monitor local audio - use a separate stream to avoid conflicts
+      if (actualMicEnabled && localMedia.state.localStream) {
         const audioTracks = localMedia.state.localStream.getAudioTracks();
-        console.log(`🎵 Found ${audioTracks.length} local audio tracks from localMedia stream`);
+        console.log(`🎵 Found ${audioTracks.length} local audio tracks for monitoring`);
         
         if (audioTracks.length > 0 && audioTracks[0].enabled) {
-          const mediaStream = new MediaStream([audioTracks[0]]);
+          // Clone the track to avoid conflicts
+          const clonedTrack = audioTracks[0].clone();
+          const mediaStream = new MediaStream([clonedTrack]);
           const source = audioContextRef.current.createMediaStreamSource(mediaStream);
           localAnalyserRef.current = audioContextRef.current.createAnalyser();
-          localAnalyserRef.current.fftSize = 512;
-          localAnalyserRef.current.smoothingTimeConstant = 0.3;
+          localAnalyserRef.current.fftSize = 256; // Smaller for less CPU usage
+          localAnalyserRef.current.smoothingTimeConstant = 0.8;
           localAnalyserRef.current.minDecibels = -90;
           localAnalyserRef.current.maxDecibels = -10;
           source.connect(localAnalyserRef.current);
-          console.log(`✅ Local audio monitoring connected to localMedia stream`);
-        } else {
-          console.log('❌ No enabled local audio tracks found in localMedia stream');
+          console.log(`✅ Local audio monitoring connected (non-interfering)`);
         }
-      } else if (!actualMicEnabled) {
-        console.log('🔇 Local audio monitoring disabled - microphone is muted');
-      } else {
-        console.log('❌ No localMedia stream available for audio monitoring');
       }
 
-      // Monitor remote audio
+      // Monitor remote audio similarly
       remoteParticipants.forEach(participant => {
         if (participant.stream && participant.isAudioEnabled) {
           const audioTracks = participant.stream.getAudioTracks();
           if (audioTracks.length > 0) {
-            const mediaStream = new MediaStream([audioTracks[0]]);
+            const clonedTrack = audioTracks[0].clone();
+            const mediaStream = new MediaStream([clonedTrack]);
             const source = audioContextRef.current!.createMediaStreamSource(mediaStream);
             const analyser = audioContextRef.current!.createAnalyser();
-            analyser.fftSize = 512;
-            analyser.smoothingTimeConstant = 0.3;
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.8;
             analyser.minDecibels = -90;
             analyser.maxDecibels = -10;
             source.connect(analyser);
             remoteAnalysersRef.current[participant.id] = analyser;
-            console.log(`✅ Remote audio monitoring connected for ${participant.displayName}`);
+            console.log(`✅ Remote audio monitoring connected for ${participant.displayName} (non-interfering)`);
           }
         }
       });
@@ -204,55 +206,51 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     } catch (error) {
       console.error('Failed to setup audio monitoring:', error);
     }
-  }, [localMedia.state.localStream, actualMicEnabled, remoteParticipants]);
+  }, [actualMicEnabled, remoteParticipants, showAudioControls, localMedia.state.localStream]);
 
   const updateAudioLevels = useCallback(() => {
+    if (!showAudioControls) {
+      // Stop monitoring if audio controls are hidden
+      cleanupAudioMonitoring();
+      return;
+    }
+
     const now = Date.now();
     const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
     
-    // Throttle updates to max 10 times per second (every 100ms)
-    const shouldUpdate = timeSinceLastUpdate >= 100;
+    // Throttle updates to max 5 times per second (every 200ms) to reduce CPU usage
+    const shouldUpdate = timeSinceLastUpdate >= 200;
     
     let localLevel = lastLocalLevelRef.current;
     const newRemoteLevels = { ...lastRemoteLevelsRef.current };
     
     // Calculate local audio level
     if (localAnalyserRef.current) {
-      const bufferLength = localAnalyserRef.current.fftSize;
+      const bufferLength = localAnalyserRef.current.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      localAnalyserRef.current.getByteTimeDomainData(dataArray);
+      localAnalyserRef.current.getByteFrequencyData(dataArray);
       
-      // Calculate RMS (Root Mean Square) for better audio level detection
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        const sample = (dataArray[i] - 128) / 128; // Convert to -1 to 1 range
-        sum += sample * sample;
-      }
-      const rms = Math.sqrt(sum / bufferLength);
-      localLevel = Math.min(Math.round(rms * 100 * 8), 100);
+      // Use frequency data instead of time domain for better audio level detection
+      const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
+      localLevel = Math.min(Math.round(average * 1.5), 100); // Scale appropriately
     }
 
     // Calculate remote audio levels
     Object.entries(remoteAnalysersRef.current).forEach(([participantId, analyser]) => {
-      const bufferLength = analyser.fftSize;
+      const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      analyser.getByteTimeDomainData(dataArray);
+      analyser.getByteFrequencyData(dataArray);
       
-      let sum = 0;
-      for (let i = 0; i < bufferLength; i++) {
-        const sample = (dataArray[i] - 128) / 128;
-        sum += sample * sample;
-      }
-      const rms = Math.sqrt(sum / bufferLength);
-      const level = Math.min(Math.round(rms * 100 * 8), 100);
+      const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
+      const level = Math.min(Math.round(average * 1.5), 100);
       newRemoteLevels[participantId] = level;
     });
 
     // Only update state if enough time has passed AND there's a meaningful change
     if (shouldUpdate) {
-      const localLevelChanged = Math.abs(localLevel - lastLocalLevelRef.current) >= 3;
+      const localLevelChanged = Math.abs(localLevel - lastLocalLevelRef.current) >= 5;
       const remoteLevelsChanged = Object.keys(newRemoteLevels).some(
-        participantId => Math.abs(newRemoteLevels[participantId] - (lastRemoteLevelsRef.current[participantId] || 0)) >= 3
+        participantId => Math.abs(newRemoteLevels[participantId] - (lastRemoteLevelsRef.current[participantId] || 0)) >= 5
       );
       
       if (localLevelChanged || remoteLevelsChanged) {
@@ -264,19 +262,24 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       }
     }
 
-    // Continue monitoring at 60fps for smooth calculations, but only update state when needed
+    // Continue monitoring at 30fps for less CPU usage
     animationFrameRef.current = requestAnimationFrame(updateAudioLevels);
-  }, []);
+  }, [showAudioControls]);
 
   const cleanupAudioMonitoring = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    
+    // Don't close the AudioContext immediately to avoid conflicts
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close();
+      // Instead of closing immediately, suspend it
+      if (audioContextRef.current.state === 'running') {
+        audioContextRef.current.suspend();
+      }
     }
-    audioContextRef.current = null;
+    
     localAnalyserRef.current = null;
     remoteAnalysersRef.current = {};
     
@@ -322,40 +325,76 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     }
   }, [state.connectionStatus]);
 
-
-
-  // Auto-select preferred camera when devices become available
+  // Set preferred devices once when media becomes available
   useEffect(() => {
-    const { cameraDeviceId } = devicePreferences;
-    const { cameraDevices, currentCameraDeviceId } = localMedia.state;
+    const { cameraDeviceId, microphoneDeviceId } = devicePreferences;
+    const { cameraDevices, microphoneDevices, currentCameraDeviceId, currentMicrophoneDeviceId } = localMedia.state;
     
-    // If we have a preferred camera and it's available, but not currently selected
+    // Only run this once to avoid conflicts
+    if (hasSetInitialDevices) return;
+    
+    // Wait for devices to be available
+    if (cameraDevices.length === 0 || microphoneDevices.length === 0) return;
+    
+    console.log('🔧 Setting initial preferred devices...');
+    
+    let deviceChangeNeeded = false;
+    
+    // Set preferred camera if available and different from current
     if (cameraDeviceId && 
         cameraDevices.some(device => device.deviceId === cameraDeviceId) &&
         currentCameraDeviceId !== cameraDeviceId) {
-      console.log('Auto-selecting preferred camera:', cameraDeviceId);
+      console.log('📹 Auto-selecting preferred camera:', cameraDeviceId);
       localMedia.actions.setCameraDevice(cameraDeviceId);
+      deviceChangeNeeded = true;
     }
-  }, [localMedia.state.cameraDevices, localMedia.state.currentCameraDeviceId, devicePreferences.cameraDeviceId]);
-
-  // Auto-select preferred microphone when devices become available
-  useEffect(() => {
-    const { microphoneDeviceId } = devicePreferences;
-    const { microphoneDevices, currentMicrophoneDeviceId } = localMedia.state;
     
-    // If we have a preferred microphone and it's available, but not currently selected
+    // Set preferred microphone if available and different from current
     if (microphoneDeviceId && 
         microphoneDevices.some(device => device.deviceId === microphoneDeviceId) &&
         currentMicrophoneDeviceId !== microphoneDeviceId) {
-      console.log('Auto-selecting preferred microphone:', microphoneDeviceId);
+      console.log('🎤 Auto-selecting preferred microphone:', microphoneDeviceId);
       localMedia.actions.setMicrophoneDevice(microphoneDeviceId);
+      deviceChangeNeeded = true;
     }
-  }, [localMedia.state.microphoneDevices, localMedia.state.currentMicrophoneDeviceId, devicePreferences.microphoneDeviceId]);
+    
+    if (deviceChangeNeeded) {
+      console.log('✅ Initial device selection completed');
+    }
+    
+    setHasSetInitialDevices(true);
+  }, [
+    localMedia.state.cameraDevices.length, 
+    localMedia.state.microphoneDevices.length,
+    hasSetInitialDevices,
+    devicePreferences.cameraDeviceId,
+    devicePreferences.microphoneDeviceId
+  ]);
 
   // Log successful connection with media info
   useEffect(() => {
     if (state.connectionStatus === 'connected' && localParticipant) {
       console.log('✅ Connection successful! Participant has stream:', !!localParticipant.stream);
+      
+      // Log audio track details for debugging
+      if (localParticipant.stream) {
+        const audioTracks = localParticipant.stream.getAudioTracks();
+        const videoTracks = localParticipant.stream.getVideoTracks();
+        console.log('🎵 Audio tracks:', audioTracks.map(track => ({
+          id: track.id,
+          label: track.label,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState
+        })));
+        console.log('📹 Video tracks:', videoTracks.map(track => ({
+          id: track.id,
+          label: track.label,
+          enabled: track.enabled,
+          muted: track.muted,
+          readyState: track.readyState
+        })));
+      }
     }
   }, [state.connectionStatus, localParticipant?.stream]);
 
@@ -428,17 +467,19 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     loadSpeakerDevices();
   }, []);
 
-  // Setup audio monitoring when media or connection changes
+  // Setup audio monitoring only when explicitly requested
   useEffect(() => {
-    if (state.connectionStatus === 'connected' && (localMedia.state.localStream || remoteParticipants.length > 0)) {
-      console.log('🎤 Setting up audio monitoring...');
+    if (showAudioControls && state.connectionStatus === 'connected') {
+      console.log('🎤 Setting up audio monitoring (on-demand)...');
       setupAudioMonitoring();
+    } else {
+      cleanupAudioMonitoring();
     }
     
     return () => {
       cleanupAudioMonitoring();
     };
-  }, [state.connectionStatus, localMedia.state.localStream, actualMicEnabled, remoteParticipants.length, setupAudioMonitoring, cleanupAudioMonitoring]);
+  }, [showAudioControls, state.connectionStatus, setupAudioMonitoring, cleanupAudioMonitoring]);
 
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
@@ -447,6 +488,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       
       // Cleanup audio monitoring
       cleanupAudioMonitoring();
+      
+      // Close audio context properly on unmount
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
       
       // Stop local media tracks
       if (localParticipant?.stream) {
@@ -684,16 +731,43 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             <div className="flex justify-center gap-4 mb-6">
               <button
                 onClick={() => {
-                  console.log('Mic button clicked. Current state:', {
+                  console.log('🎤 Mic button clicked. Current state:', {
                     wherebyState: localParticipant?.isAudioEnabled,
                     actualMicEnabled,
-                    hasActions: !!actions.toggleMicrophone
+                    hasActions: !!actions.toggleMicrophone,
+                    streamAudioTracks: localParticipant?.stream?.getAudioTracks().length || 0,
+                    currentMicDevice: localMedia.state.currentMicrophoneDeviceId
                   });
+                  
+                  // Check if we have proper audio tracks before toggling
+                  if (localParticipant?.stream) {
+                    const audioTracks = localParticipant.stream.getAudioTracks();
+                    console.log('🎵 Current audio tracks before toggle:', audioTracks.map(track => ({
+                      id: track.id,
+                      label: track.label,
+                      enabled: track.enabled,
+                      readyState: track.readyState
+                    })));
+                  }
+                  
                   try {
                     actions.toggleMicrophone();
-                    console.log('toggleMicrophone called successfully');
+                    console.log('✅ toggleMicrophone called successfully');
+                    
+                    // Log the result after a short delay
+                    setTimeout(() => {
+                      if (localParticipant?.stream) {
+                        const audioTracks = localParticipant.stream.getAudioTracks();
+                        console.log('🎵 Audio tracks after toggle:', audioTracks.map(track => ({
+                          id: track.id,
+                          label: track.label,
+                          enabled: track.enabled,
+                          readyState: track.readyState
+                        })));
+                      }
+                    }, 100);
                   } catch (error) {
-                    console.error('Error toggling microphone:', error);
+                    console.error('❌ Error toggling microphone:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 ${

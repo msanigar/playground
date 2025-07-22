@@ -255,7 +255,11 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
       streamRef.current = null;
     }
     console.log('✅ MediaSetup: Preview cleanup completed, joining call...');
-    onComplete();
+    
+    // Add a small delay to ensure streams are fully stopped before Whereby initializes
+    setTimeout(() => {
+      onComplete();
+    }, 300); // Give enough time for stream cleanup
   };
 
   return (
