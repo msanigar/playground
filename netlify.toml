@@ -1,0 +1,69 @@
+[build]
+  # Build command for Vite
+  command = "npm run build"
+  
+  # Directory to publish (Vite outputs to 'dist')
+  publish = "dist"
+  
+  # Node version (specify a stable version)
+  environment = { NODE_VERSION = "18" }
+
+# SPA redirect - all routes should serve index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Security and performance headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Security headers
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    
+    # Content Security Policy (relaxed for Whereby and other APIs)
+    Content-Security-Policy = """
+      default-src 'self';
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' *.whereby.com *.vite.dev;
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: *.unsplash.com *.whereby.com;
+      media-src 'self' blob: *.whereby.com;
+      connect-src 'self' *.whereby.com *.unsplash.com api.open-meteo.com quote-garden.herokuapp.com *.bigdatacloud.net ws: wss:;
+      frame-src *.whereby.com;
+      worker-src 'self' blob:;
+    """
+
+# Cache static assets
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Cache other static files
+[[headers]]
+  for = "*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Environment variables (these would be set in Netlify UI)
+# VITE_WHEREBY_API_KEY = "your-whereby-api-key-here"
+# VITE_UNSPLASH_KEY = "your-unsplash-access-key-here"  
+# VITE_DEFAULT_ROOM_URL = "https://yourdomain.whereby.com/your-room-name"
+
+# Functions (if you ever need serverless functions)
+[functions]
+  directory = "netlify/functions"
+
+# Development settings
+[dev]
+  command = "npm run dev"
+  port = 5173
+  publish = "dist" 
