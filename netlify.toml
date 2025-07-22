@@ -27,12 +27,12 @@
     # Content Security Policy (relaxed for Whereby and other APIs)
     Content-Security-Policy = """
       default-src 'self';
-      script-src 'self' 'unsafe-inline' 'unsafe-eval' *.whereby.com *.vite.dev;
+      script-src 'self' 'unsafe-inline' 'unsafe-eval' *.whereby.com *.whereby.dev *.vite.dev;
       style-src 'self' 'unsafe-inline';
-      img-src 'self' data: *.unsplash.com *.whereby.com;
-      media-src 'self' blob: *.whereby.com;
-      connect-src 'self' *.whereby.com *.unsplash.com api.open-meteo.com quote-garden.herokuapp.com *.bigdatacloud.net ws: wss:;
-      frame-src *.whereby.com;
+      img-src 'self' data: *.unsplash.com *.whereby.com *.whereby.dev;
+      media-src 'self' blob: *.whereby.com *.whereby.dev;
+      connect-src 'self' *.whereby.com *.whereby.dev *.unsplash.com api.open-meteo.com quote-garden.herokuapp.com *.bigdatacloud.net ws: wss:;
+      frame-src *.whereby.com *.whereby.dev;
       worker-src 'self' blob:;
     """
 
