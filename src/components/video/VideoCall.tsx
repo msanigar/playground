@@ -40,9 +40,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const [showDebug, setShowDebug] = useState(false);
   const [chatInput, setChatInput] = useState('');
   
-  // Local state to track actual mic/video status since Whereby state might be delayed
-  const [localMicEnabled, setLocalMicEnabled] = useState(true);
-  const [localVideoEnabled, setLocalVideoEnabled] = useState(true);
+
   
   // Audio monitoring state
   const [localAudioLevel, setLocalAudioLevel] = useState(0);
@@ -136,6 +134,10 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const { state, actions } = connection;
   const { localParticipant, remoteParticipants } = state;
 
+  // Use Whereby's state as source of truth for mic/video status
+  const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
+  const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
+
   // Audio monitoring functions
   const setupAudioMonitoring = useCallback(() => {
     try {
@@ -153,9 +155,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         audioContextRef.current.resume();
       }
 
-      // Monitor local audio - always use localMedia stream (raw microphone input)
-      // This works during both setup and calls, unlike participant stream which may be processed
-      if (localMedia.state.localStream) {
+      // Monitor local audio - use localMedia stream but respect mute state
+      // Only show audio levels when microphone is not muted
+      if (localMedia.state.localStream && actualMicEnabled) {
         const audioTracks = localMedia.state.localStream.getAudioTracks();
         console.log(`🎵 Found ${audioTracks.length} local audio tracks from localMedia stream`);
         
@@ -172,6 +174,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         } else {
           console.log('❌ No enabled local audio tracks found in localMedia stream');
         }
+      } else if (!actualMicEnabled) {
+        console.log('🔇 Local audio monitoring disabled - microphone is muted');
       } else {
         console.log('❌ No localMedia stream available for audio monitoring');
       }
@@ -200,7 +204,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     } catch (error) {
       console.error('Failed to setup audio monitoring:', error);
     }
-  }, [localMedia.state.localStream, remoteParticipants]);
+  }, [localMedia.state.localStream, actualMicEnabled, remoteParticipants]);
 
   const updateAudioLevels = useCallback(() => {
     const now = Date.now();
@@ -210,7 +214,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     const shouldUpdate = timeSinceLastUpdate >= 100;
     
     let localLevel = lastLocalLevelRef.current;
-    let newRemoteLevels = { ...lastRemoteLevelsRef.current };
+    const newRemoteLevels = { ...lastRemoteLevelsRef.current };
     
     // Calculate local audio level
     if (localAnalyserRef.current) {
@@ -434,7 +438,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return () => {
       cleanupAudioMonitoring();
     };
-  }, [state.connectionStatus, localMedia.state.localStream, remoteParticipants.length, setupAudioMonitoring, cleanupAudioMonitoring]);
+  }, [state.connectionStatus, localMedia.state.localStream, actualMicEnabled, remoteParticipants.length, setupAudioMonitoring, cleanupAudioMonitoring]);
 
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
@@ -547,7 +551,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       className="w-full h-full object-cover"
                     />
                     {/* Dynamic Audio Indicator */}
-                    {localMicEnabled && (
+                    {actualMicEnabled && (
                       <div className="absolute top-4 right-4">
                         <div className="flex items-center gap-2 bg-green-500/80 backdrop-blur-sm rounded-full px-3 py-1.5">
                           <div className="flex items-center gap-1">
@@ -680,29 +684,25 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             <div className="flex justify-center gap-4 mb-6">
               <button
                 onClick={() => {
-                  const actualState = getActualAudioVideoState();
                   console.log('Mic button clicked. Current state:', {
                     wherebyState: localParticipant?.isAudioEnabled,
-                    localState: localMicEnabled,
-                    actualStreamState: actualState,
-                    hasActions: !!actions.toggleMicrophone,
-                    actionsAvailable: Object.keys(actions)
+                    actualMicEnabled,
+                    hasActions: !!actions.toggleMicrophone
                   });
                   try {
                     actions.toggleMicrophone();
-                    setLocalMicEnabled(prev => !prev); // Toggle local state
-                    console.log('toggleMicrophone called successfully, new local state:', !localMicEnabled);
+                    console.log('toggleMicrophone called successfully');
                   } catch (error) {
                     console.error('Error toggling microphone:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 ${
-                  localMicEnabled 
+                  actualMicEnabled 
                     ? 'bg-green-500 hover:bg-green-600' 
                     : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
-                {localMicEnabled ? (
+                {actualMicEnabled ? (
                   <Mic className="w-6 h-6 text-white" />
                 ) : (
                   <MicOff className="w-6 h-6 text-white" />
@@ -711,28 +711,25 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
               <button
                 onClick={() => {
-                  const actualState = getActualAudioVideoState();
                   console.log('Video button clicked. Current state:', {
                     wherebyState: localParticipant?.isVideoEnabled,
-                    localState: localVideoEnabled,
-                    actualStreamState: actualState,
+                    actualVideoEnabled,
                     hasActions: !!actions.toggleCamera
                   });
                   try {
                     actions.toggleCamera();
-                    setLocalVideoEnabled(prev => !prev); // Toggle local state
-                    console.log('toggleCamera called successfully, new local state:', !localVideoEnabled);
+                    console.log('toggleCamera called successfully');
                   } catch (error) {
                     console.error('Error toggling camera:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 ${
-                  localVideoEnabled 
+                  actualVideoEnabled 
                     ? 'bg-green-500 hover:bg-green-600' 
                     : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
-                {localVideoEnabled ? (
+                {actualVideoEnabled ? (
                   <Video className="w-6 h-6 text-white" />
                 ) : (
                   <VideoOff className="w-6 h-6 text-white" />
@@ -959,9 +956,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               <p><strong>Participant ID:</strong> {localParticipant?.id || 'none'}</p>
               <p><strong>Display Name:</strong> {localParticipant?.displayName || 'none'}</p>
               <p><strong>Audio Enabled (Whereby):</strong> {localParticipant?.isAudioEnabled ? 'yes' : 'no'}</p>
-              <p><strong>Audio Enabled (Local):</strong> {localMicEnabled ? 'yes' : 'no'}</p>
+              <p><strong>Audio Enabled (Actual):</strong> {actualMicEnabled ? 'yes' : 'no'}</p>
               <p><strong>Video Enabled (Whereby):</strong> {localParticipant?.isVideoEnabled ? 'yes' : 'no'}</p>
-              <p><strong>Video Enabled (Local):</strong> {localVideoEnabled ? 'yes' : 'no'}</p>
+              <p><strong>Video Enabled (Actual):</strong> {actualVideoEnabled ? 'yes' : 'no'}</p>
               <p><strong>Has Stream:</strong> {localParticipant?.stream ? 'yes' : 'no'}</p>
               <p><strong>Remote Participants:</strong> {remoteParticipants.length}</p>
               <p><strong>Chat Messages:</strong> {state.chatMessages.length}</p>
