@@ -774,95 +774,88 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                     console.log(`🎤 Toggling microphone: ${wasEnabled ? 'muting' : 'unmuting'}`);
                     
                     if (wasEnabled) {
-                      // MUTING - Aggressive shutdown of all audio
-                      console.log(`🚫 Initiating complete audio shutdown`);
+                      // MUTING - More controlled approach
+                      console.log(`🔇 Initiating controlled mute`);
                       
                       // 1. Immediately stop audio monitoring and clear levels
                       cleanupAudioMonitoring();
                       setLocalAudioLevel(0);
                       
-                      // 2. Disable ALL audio tracks immediately and aggressively
-                      const allStreams = [
-                        localParticipant?.stream,
-                        localMedia.state.localStream
-                      ].filter(Boolean);
-                      
-                      allStreams.forEach((stream, streamIndex) => {
-                        if (stream) {
-                          const audioTracks = stream.getAudioTracks();
-                          console.log(`🔇 Disabling ${audioTracks.length} tracks in stream ${streamIndex}`);
-                          audioTracks.forEach((track, trackIndex) => {
-                            // Multiple ways to disable the track
-                            track.enabled = false;
-                            if (track.stop) {
-                              // Some tracks need to be stopped completely
-                                                             try {
-                                 track.stop();
-                                 console.log(`🛑 Stopped track ${trackIndex}: ${track.label || track.id}`);
-                               } catch {
-                                 console.log(`⚠️ Could not stop track ${trackIndex}, but disabled it`);
-                               }
-                            }
-                          });
-                        }
-                      });
-                      
-                      // 3. Use Whereby's toggle
+                      // 2. Use Whereby's toggle first (let it handle the primary muting)
                       actions.toggleMicrophone();
                       
-                      // 4. Force verification and additional cleanup after delay
+                      // 3. Then disable tracks as backup (but don't stop them permanently)
+                      setTimeout(() => {
+                        const allStreams = [
+                          localParticipant?.stream,
+                          localMedia.state.localStream
+                        ].filter(Boolean);
+                        
+                        allStreams.forEach((stream, streamIndex) => {
+                          if (stream) {
+                            const audioTracks = stream.getAudioTracks();
+                            console.log(`🔇 Disabling ${audioTracks.length} tracks in stream ${streamIndex}`);
+                            audioTracks.forEach((track, trackIndex) => {
+                              // Only disable, don't stop permanently
+                              track.enabled = false;
+                              console.log(`🔇 Disabled track ${trackIndex}: ${track.label || track.id}`);
+                            });
+                          }
+                        });
+                        
+                        // Force audio level to stay at 0
+                        setLocalAudioLevel(0);
+                      }, 100);
+                      
+                      // 4. Final verification
                       setTimeout(() => {
                         const currentState = localParticipant?.isAudioEnabled ?? true;
+                        console.log(`✅ Mute state: ${currentState ? 'FAILED - still unmuted' : 'SUCCESS - muted'}`);
+                        console.log(`✅ Audio level: ${localAudioLevel}%`);
                         
+                        // If still unmuted, try one more time
                         if (currentState) {
-                          console.log(`🔄 Whereby still shows unmuted, forcing additional toggle`);
+                          console.log(`🔄 Retrying Whereby toggle`);
                           actions.toggleMicrophone();
                         }
-                        
-                        // Ensure audio level stays at 0
-                        setLocalAudioLevel(0);
-                        
-                        // Final verification
-                        setTimeout(() => {
-                          const finalState = localParticipant?.isAudioEnabled ?? true;
-                          console.log(`✅ Final mute state: ${finalState ? 'FAILED - still unmuted' : 'SUCCESS - muted'}`);
-                          console.log(`✅ Final audio level: ${localAudioLevel}%`);
-                        }, 200);
                       }, 300);
                       
                     } else {
-                      // UNMUTING - Restart everything
-                      console.log(`🔊 Initiating audio restart`);
+                      // UNMUTING - Careful restart
+                      console.log(`🔊 Initiating controlled unmute`);
                       
                       // 1. Use Whereby's toggle first
                       actions.toggleMicrophone();
                       
-                      // 2. Re-enable tracks if needed
+                      // 2. Re-enable tracks after delay
                       setTimeout(() => {
-                        if (localParticipant?.stream) {
-                          const audioTracks = localParticipant.stream.getAudioTracks();
-                          audioTracks.forEach((track, index) => {
-                            if (!track.enabled) {
-                              track.enabled = true;
-                              console.log(`🔊 Re-enabled track ${index}: ${track.label || track.id}`);
-                            }
-                          });
-                        }
+                        const allStreams = [
+                          localParticipant?.stream,
+                          localMedia.state.localStream
+                        ].filter(Boolean);
                         
-                        if (localMedia.state.localStream) {
-                          const localAudioTracks = localMedia.state.localStream.getAudioTracks();
-                          localAudioTracks.forEach((track, index) => {
-                            if (!track.enabled) {
-                              track.enabled = true;
-                              console.log(`🔊 Re-enabled localMedia track ${index}: ${track.label || track.id}`);
-                            }
-                          });
-                        }
+                        allStreams.forEach((stream, streamIndex) => {
+                          if (stream) {
+                            const audioTracks = stream.getAudioTracks();
+                            console.log(`🔊 Re-enabling ${audioTracks.length} tracks in stream ${streamIndex}`);
+                            audioTracks.forEach((track, trackIndex) => {
+                              // Only re-enable if track is still live
+                              if (track.readyState === 'live') {
+                                track.enabled = true;
+                                console.log(`🔊 Re-enabled track ${trackIndex}: ${track.label || track.id}`);
+                              } else {
+                                console.warn(`⚠️ Track ${trackIndex} is not live: ${track.readyState}`);
+                              }
+                            });
+                          }
+                        });
                         
-                        // 3. Restart audio monitoring
+                        // 3. Restart audio monitoring after tracks are ready
                         setTimeout(() => {
-                          setupAudioMonitoring();
-                          console.log(`🎤 Audio monitoring restarted`);
+                          if (localParticipant?.isAudioEnabled) {
+                            setupAudioMonitoring();
+                            console.log(`🎤 Audio monitoring restarted for unmuted mic`);
+                          }
                         }, 200);
                       }, 100);
                     }
