@@ -1128,48 +1128,86 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                         console.log(`🔊 Direct unmuting - recreating audio stream`);
                         
                         try {
-                          // Use Whereby's toggle first to attempt normal unmuting
-                          actions.toggleMicrophone();
+                          // STEP 1: Use Whereby's toggle to re-enable at SDK level
+                          if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) {
+                            console.log(`🔊 Enabling Whereby audio publishing`);
+                            actions.toggleMicrophone();
+                          }
                           
-                          // Wait a moment for Whereby to process, then check if we need to recreate streams
-                          setTimeout(async () => {
-                            const hasLiveAudioTracks = [
+                          // STEP 2: Force recreate microphone stream
+                          const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || devicePreferences.microphoneDeviceId || 'default';
+                          console.log(`🔄 Force recreating microphone stream with device: ${currentMicDevice}`);
+                          
+                          try {
+                            // Force a device "change" to the same device to recreate the stream
+                            if (localMedia.actions.setMicrophoneDevice) {
+                              await localMedia.actions.setMicrophoneDevice(currentMicDevice);
+                              console.log(`🎤 Microphone stream recreated with device: ${currentMicDevice}`);
+                            }
+                          } catch (deviceError) {
+                            console.warn(`⚠️ Device reset failed, trying getUserMedia directly:`, deviceError);
+                            
+                            // Fallback: Try to get a new media stream directly
+                            try {
+                              const newStream = await navigator.mediaDevices.getUserMedia({ 
+                                audio: currentMicDevice !== 'default' 
+                                  ? { deviceId: { exact: currentMicDevice } }
+                                  : true,
+                                video: false 
+                              });
+                              
+                              const newAudioTrack = newStream.getAudioTracks()[0];
+                              if (newAudioTrack && localParticipant?.stream) {
+                                // Replace the audio track in the participant stream
+                                const oldAudioTracks = localParticipant.stream.getAudioTracks();
+                                oldAudioTracks.forEach(track => {
+                                  localParticipant.stream?.removeTrack(track);
+                                  track.stop();
+                                });
+                                
+                                localParticipant.stream.addTrack(newAudioTrack);
+                                console.log(`🎤 Manually added new audio track: ${newAudioTrack.label}`);
+                              }
+                            } catch (mediaError) {
+                              console.error(`❌ Failed to recreate audio stream:`, mediaError);
+                            }
+                          }
+                          
+                          // STEP 3: Update our state and restart monitoring
+                          setIsDirectlyMuted(false);
+                          
+                          // Wait and verify audio tracks are working
+                          setTimeout(() => {
+                            const workingTracks = [
                               ...(localParticipant?.stream?.getAudioTracks() || []),
                               ...(localMedia.state.localStream?.getAudioTracks() || [])
-                            ].some(track => track.readyState === 'live' && track.enabled);
+                            ].filter(track => track.enabled && track.readyState === 'live');
                             
-                            if (!hasLiveAudioTracks) {
-                              console.log(`🔄 No live audio tracks found, attempting to restart microphone`);
+                            console.log(`🔍 Audio recovery check: ${workingTracks.length} working tracks found`);
+                            workingTracks.forEach((track, i) => {
+                              console.log(`  Track ${i}: ${track.label} (enabled: ${track.enabled}, state: ${track.readyState})`);
+                            });
+                            
+                            if (workingTracks.length > 0) {
+                              setupAudioMonitoring();
+                              console.log(`✅ Audio monitoring restarted successfully`);
+                            } else {
+                              console.error(`❌ Audio recovery failed - no working tracks`);
                               
-                              // Try to restart microphone using localMedia actions
-                              if (localMedia.actions.setMicrophoneDevice && devicePreferences.microphoneDeviceId) {
+                              // Last resort: Try a complete audio restart
+                              console.log(`🔄 Attempting complete audio restart...`);
+                              setTimeout(async () => {
                                 try {
-                                  await localMedia.actions.setMicrophoneDevice(devicePreferences.microphoneDeviceId);
-                                  console.log(`🎤 Microphone device reset to: ${devicePreferences.microphoneDeviceId}`);
-                                } catch (error) {
-                                  console.warn(`⚠️ Failed to reset microphone device:`, error);
+                                  if (localMedia.actions.setMicrophoneDevice) {
+                                    await localMedia.actions.setMicrophoneDevice(currentMicDevice);
+                                    console.log(`🎤 Complete restart attempted`);
+                                  }
+                                } catch (e) {
+                                  console.error(`❌ Complete restart failed:`, e);
                                 }
-                              }
+                              }, 500);
                             }
-                            
-                            // Update our direct mute state
-                            setIsDirectlyMuted(false);
-                            
-                            // Restart audio monitoring after delay
-                            setTimeout(() => {
-                              const finalCheck = [
-                                ...(localParticipant?.stream?.getAudioTracks() || []),
-                                ...(localMedia.state.localStream?.getAudioTracks() || [])
-                              ].some(track => track.enabled && track.readyState === 'live');
-                              
-                              if (finalCheck) {
-                                setupAudioMonitoring();
-                                console.log(`🎤 Audio monitoring restarted`);
-                              } else {
-                                console.warn(`⚠️ Still no live tracks - audio monitoring not started`);
-                              }
-                            }, 300);
-                          }, 100);
+                          }, 500);
                           
                         } catch (error) {
                           console.error(`❌ Error during unmuting:`, error);
