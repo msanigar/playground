@@ -57,12 +57,19 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const lastRemoteLevelsRef = useRef<{[participantId: string]: number}>({});
   
   // Device preferences
-  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => {
+    const preferences = loadDevicePreferences();
+    console.log('🔧 Loaded device preferences:', preferences);
+    return preferences;
+  });
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
   const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
   const [showFeedbackWarning, setShowFeedbackWarning] = useState(false);
   const [isDirectlyMuted, setIsDirectlyMuted] = useState(false);
   const [deviceCollisionDetected, setDeviceCollisionDetected] = useState(false);
+  
+  // Stable tab ID for collision detection
+  const tabIdRef = useRef<string>(`tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -193,7 +200,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const checkDeviceCollision = useCallback(() => {
     try {
       const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || 'default';
-      const tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const tabId = tabIdRef.current; // Use stable tab ID
       const storageKey = `microphone_usage_${currentMicDevice}`;
       
       // Get existing usage data
@@ -495,15 +502,23 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         // Apply camera preference immediately if we have one
         if (cameraDeviceId && setCameraDevice) {
           console.log(`🎥 Applying preferred camera: ${cameraDeviceId}`);
+          console.log(`🎥 Current camera before change: ${localMedia.state.currentCameraDeviceId}`);
           await setCameraDevice(cameraDeviceId);
           deviceChangeNeeded = true;
+          console.log(`🎥 Current camera after change: ${localMedia.state.currentCameraDeviceId}`);
+        } else {
+          console.log(`🎥 No camera preference saved or setCameraDevice not available`);
         }
         
         // Apply microphone preference immediately if we have one  
         if (microphoneDeviceId && setMicrophoneDevice) {
           console.log(`🎤 Applying preferred microphone: ${microphoneDeviceId}`);
+          console.log(`🎤 Current microphone before change: ${localMedia.state.currentMicrophoneDeviceId}`);
           await setMicrophoneDevice(microphoneDeviceId);
           deviceChangeNeeded = true;
+          console.log(`🎤 Current microphone after change: ${localMedia.state.currentMicrophoneDeviceId}`);
+        } else {
+          console.log(`🎤 No microphone preference saved or setMicrophoneDevice not available`);
         }
         
         if (deviceChangeNeeded) {
@@ -1005,6 +1020,16 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       
                       console.log(`✅ Direct mute completed - ${mutedTrackCount} tracks disabled`);
                       console.log(`✅ Audio level forced to: 0%`);
+                      
+                      // CRITICAL: Tell Whereby to stop audio publishing at WebRTC level
+                      try {
+                        if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
+                          console.log(`🔇 Stopping Whereby audio publishing`);
+                          actions.toggleMicrophone();
+                        }
+                      } catch (error) {
+                        console.warn('Failed to toggle Whereby microphone:', error);
+                      }
                       
                       // Update our direct mute state
                       setIsDirectlyMuted(true);
