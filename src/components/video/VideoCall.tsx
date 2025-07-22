@@ -62,6 +62,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
   const [showFeedbackWarning, setShowFeedbackWarning] = useState(false);
   const [isDirectlyMuted, setIsDirectlyMuted] = useState(false);
+  const [deviceCollisionDetected, setDeviceCollisionDetected] = useState(false);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -119,7 +120,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return participantId;
   };
 
-  // Initialize media - we'll set preferred devices after initialization
+  // Initialize media - we'll apply preferences immediately after initialization  
   const localMedia = useLocalMedia({
     audio: true,
     video: true,
@@ -188,6 +189,88 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return totalParticipants > 6 ? "text-xs px-2 py-1" : "text-sm px-3 py-2";
   };
 
+  // Device collision detection using localStorage
+  const checkDeviceCollision = useCallback(() => {
+    try {
+      const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || 'default';
+      const tabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const storageKey = `microphone_usage_${currentMicDevice}`;
+      
+      // Get existing usage data
+      const existingData = localStorage.getItem(storageKey);
+      const now = Date.now();
+      
+      if (existingData) {
+        const parsed = JSON.parse(existingData);
+        const timeDiff = now - parsed.timestamp;
+        
+        // If another tab used this device recently (within 5 seconds), it's a collision
+        if (timeDiff < 5000 && parsed.tabId !== tabId) {
+          console.warn(`🚨 Device collision detected! Another tab is using microphone: ${currentMicDevice}`);
+          setDeviceCollisionDetected(true);
+          setShowFeedbackWarning(true);
+          
+          // Auto-disable microphone in this tab to prevent feedback
+          if (!isDirectlyMuted) {
+            console.log(`🚫 Auto-disabling microphone due to device collision`);
+            setIsDirectlyMuted(true);
+            
+            // Stop all audio tracks
+            if (localParticipant?.stream) {
+              localParticipant.stream.getAudioTracks().forEach(track => {
+                track.enabled = false;
+                track.stop();
+              });
+            }
+            if (localMedia.state.localStream) {
+              localMedia.state.localStream.getAudioTracks().forEach(track => {
+                track.enabled = false;
+                track.stop();
+              });
+            }
+            
+            // Disable Whereby's audio
+            if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
+              actions.toggleMicrophone();
+            }
+            
+            cleanupAudioMonitoring();
+            setLocalAudioLevel(0);
+          }
+          
+          return true;
+        }
+      }
+      
+      // Update usage data for this tab
+      localStorage.setItem(storageKey, JSON.stringify({
+        tabId,
+        timestamp: now,
+        deviceLabel: currentMicDevice
+      }));
+      
+      // Clean up old entries periodically
+      setTimeout(() => {
+        try {
+          const data = localStorage.getItem(storageKey);
+          if (data) {
+            const parsed = JSON.parse(data);
+            if (parsed.tabId === tabId && Date.now() - parsed.timestamp > 10000) {
+              localStorage.removeItem(storageKey);
+            }
+          }
+        } catch {
+          // Ignore cleanup errors
+        }
+      }, 15000);
+      
+      return false;
+    } catch (error) {
+      console.error('Error checking device collision:', error);
+      return false;
+    }
+  }, [localMedia.state.currentMicrophoneDeviceId, localParticipant?.stream, localParticipant?.isAudioEnabled, isDirectlyMuted, actions]);
+
 
 
   // Audio monitoring functions - simplified to avoid interference
@@ -232,6 +315,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             source.connect(localAnalyserRef.current);
             
             console.log(`🎤 Audio monitoring setup: using track ${enabledTracks[0].label || enabledTracks[0].id}`);
+            
+            // Check for device collision after setting up monitoring
+            checkDeviceCollision();
           } catch (error) {
             console.warn('Failed to setup local audio monitoring:', error);
             setLocalAudioLevel(0);
@@ -393,46 +479,57 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     }
   }, [state.connectionStatus]);
 
-  // Set preferred devices once when media becomes available
+  // Apply preferred devices immediately when media actions become available
   useEffect(() => {
     const { cameraDeviceId, microphoneDeviceId } = devicePreferences;
-    const { cameraDevices, microphoneDevices, currentCameraDeviceId, currentMicrophoneDeviceId } = localMedia.state;
+    const { setCameraDevice, setMicrophoneDevice } = localMedia.actions;
     
     // Only run this once to avoid conflicts
     if (hasSetInitialDevices) return;
     
-    // Wait for devices to be available
-    if (cameraDevices.length === 0 || microphoneDevices.length === 0) return;
+    // Apply preferences as soon as the actions are available, without waiting for device enumeration
+    const applyDevicePreferences = async () => {
+      let deviceChangeNeeded = false;
+      
+      try {
+        // Apply camera preference immediately if we have one
+        if (cameraDeviceId && setCameraDevice) {
+          console.log(`🎥 Applying preferred camera: ${cameraDeviceId}`);
+          await setCameraDevice(cameraDeviceId);
+          deviceChangeNeeded = true;
+        }
+        
+        // Apply microphone preference immediately if we have one  
+        if (microphoneDeviceId && setMicrophoneDevice) {
+          console.log(`🎤 Applying preferred microphone: ${microphoneDeviceId}`);
+          await setMicrophoneDevice(microphoneDeviceId);
+          deviceChangeNeeded = true;
+        }
+        
+        if (deviceChangeNeeded) {
+          console.log('✅ Device preferences applied immediately');
+        }
+        
+        setHasSetInitialDevices(true);
+      } catch (error) {
+        console.warn('Failed to apply device preferences:', error);
+        // Still mark as set to avoid retrying
+        setHasSetInitialDevices(true);
+      }
+    };
     
-    let deviceChangeNeeded = false;
+    // Apply preferences after a short delay to ensure Whereby is ready
+    const timer = setTimeout(() => {
+      applyDevicePreferences();
+    }, 200);
     
-    // Set preferred camera if available and different from current
-    if (cameraDeviceId && 
-        cameraDevices.some(device => device.deviceId === cameraDeviceId) &&
-        currentCameraDeviceId !== cameraDeviceId) {
-      localMedia.actions.setCameraDevice(cameraDeviceId);
-      deviceChangeNeeded = true;
-    }
-    
-    // Set preferred microphone if available and different from current
-    if (microphoneDeviceId && 
-        microphoneDevices.some(device => device.deviceId === microphoneDeviceId) &&
-        currentMicrophoneDeviceId !== microphoneDeviceId) {
-      localMedia.actions.setMicrophoneDevice(microphoneDeviceId);
-      deviceChangeNeeded = true;
-    }
-    
-    if (deviceChangeNeeded) {
-      console.log('✅ Device preferences applied');
-    }
-    
-    setHasSetInitialDevices(true);
+    return () => clearTimeout(timer);
   }, [
-    localMedia.state.cameraDevices.length, 
-    localMedia.state.microphoneDevices.length,
     hasSetInitialDevices,
     devicePreferences.cameraDeviceId,
-    devicePreferences.microphoneDeviceId
+    devicePreferences.microphoneDeviceId,
+    localMedia.actions.setCameraDevice,
+    localMedia.actions.setMicrophoneDevice
   ]);
 
   // Log successful connection with media info (only once)
@@ -680,7 +777,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               <div className="flex-1">
                 <div className="text-yellow-100 font-medium">Multiple tabs detected!</div>
                 <div className="text-yellow-200 text-sm">
-                  {isDirectlyMuted 
+                  {deviceCollisionDetected 
+                    ? "Device collision detected - another tab is using this microphone." 
+                    : isDirectlyMuted 
                     ? "Microphone publishing disabled in this tab to prevent feedback." 
                     : "Microphone publishing will be disabled automatically to prevent feedback."
                   }
