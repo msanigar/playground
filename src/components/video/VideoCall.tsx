@@ -61,6 +61,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
   const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
   const [showFeedbackWarning, setShowFeedbackWarning] = useState(false);
+  const [isDirectlyMuted, setIsDirectlyMuted] = useState(false);
 
   const handleSendMessage = () => {
     if (chatInput.trim()) {
@@ -135,8 +136,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const { state, actions } = connection;
   const { localParticipant, remoteParticipants } = state;
 
-  // Use Whereby's state as source of truth for mic/video status
-  const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
+  // Use combination of Whereby's state and our direct control for mic/video status
+  const actualMicEnabled = isDirectlyMuted ? false : (localParticipant?.isAudioEnabled ?? true);
   const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
 
   // Calculate dynamic grid layout based on participant count
@@ -771,97 +772,99 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 onClick={async () => {
                   try {
                     const wasEnabled = actualMicEnabled;
-                    console.log(`🎤 Toggling microphone: ${wasEnabled ? 'muting' : 'unmuting'}`);
+                    console.log(`🎤 Direct mute control: ${wasEnabled ? 'muting' : 'unmuting'}`);
                     
                     if (wasEnabled) {
-                      // MUTING - More controlled approach
-                      console.log(`🔇 Initiating controlled mute`);
+                      // MUTING - Direct approach without relying on Whereby toggle
+                      console.log(`🔇 Direct muting - disabling all audio tracks`);
                       
-                      // 1. Immediately stop audio monitoring and clear levels
+                      // 1. Stop audio monitoring immediately
                       cleanupAudioMonitoring();
                       setLocalAudioLevel(0);
                       
-                      // 2. Use Whereby's toggle first (let it handle the primary muting)
-                      actions.toggleMicrophone();
+                      // 2. Disable all audio tracks directly and immediately
+                      let mutedTrackCount = 0;
                       
-                      // 3. Then disable tracks as backup (but don't stop them permanently)
-                      setTimeout(() => {
-                        const allStreams = [
-                          localParticipant?.stream,
-                          localMedia.state.localStream
-                        ].filter(Boolean);
-                        
-                        allStreams.forEach((stream, streamIndex) => {
-                          if (stream) {
-                            const audioTracks = stream.getAudioTracks();
-                            console.log(`🔇 Disabling ${audioTracks.length} tracks in stream ${streamIndex}`);
-                            audioTracks.forEach((track, trackIndex) => {
-                              // Only disable, don't stop permanently
-                              track.enabled = false;
-                              console.log(`🔇 Disabled track ${trackIndex}: ${track.label || track.id}`);
-                            });
-                          }
+                      if (localParticipant?.stream) {
+                        const audioTracks = localParticipant.stream.getAudioTracks();
+                        audioTracks.forEach((track, index) => {
+                          track.enabled = false;
+                          mutedTrackCount++;
+                          console.log(`🔇 Muted localParticipant track ${index}: ${track.label || track.id}`);
                         });
-                        
-                        // Force audio level to stay at 0
-                        setLocalAudioLevel(0);
-                      }, 100);
+                      }
                       
-                      // 4. Final verification
-                      setTimeout(() => {
-                        const currentState = localParticipant?.isAudioEnabled ?? true;
-                        console.log(`✅ Mute state: ${currentState ? 'FAILED - still unmuted' : 'SUCCESS - muted'}`);
-                        console.log(`✅ Audio level: ${localAudioLevel}%`);
-                        
-                        // If still unmuted, try one more time
-                        if (currentState) {
-                          console.log(`🔄 Retrying Whereby toggle`);
-                          actions.toggleMicrophone();
-                        }
-                      }, 300);
+                      if (localMedia.state.localStream) {
+                        const audioTracks = localMedia.state.localStream.getAudioTracks();
+                        audioTracks.forEach((track, index) => {
+                          track.enabled = false;
+                          mutedTrackCount++;
+                          console.log(`🔇 Muted localMedia track ${index}: ${track.label || track.id}`);
+                        });
+                      }
+                      
+                      console.log(`✅ Direct mute completed - ${mutedTrackCount} tracks disabled`);
+                      console.log(`✅ Audio level forced to: 0%`);
+                      
+                      // Update our direct mute state
+                      setIsDirectlyMuted(true);
                       
                     } else {
-                      // UNMUTING - Careful restart
-                      console.log(`🔊 Initiating controlled unmute`);
+                      // UNMUTING - Direct approach
+                      console.log(`🔊 Direct unmuting - enabling all audio tracks`);
                       
-                      // 1. Use Whereby's toggle first
-                      actions.toggleMicrophone();
+                      let unmutedTrackCount = 0;
                       
-                      // 2. Re-enable tracks after delay
-                      setTimeout(() => {
-                        const allStreams = [
-                          localParticipant?.stream,
-                          localMedia.state.localStream
-                        ].filter(Boolean);
-                        
-                        allStreams.forEach((stream, streamIndex) => {
-                          if (stream) {
-                            const audioTracks = stream.getAudioTracks();
-                            console.log(`🔊 Re-enabling ${audioTracks.length} tracks in stream ${streamIndex}`);
-                            audioTracks.forEach((track, trackIndex) => {
-                              // Only re-enable if track is still live
-                              if (track.readyState === 'live') {
-                                track.enabled = true;
-                                console.log(`🔊 Re-enabled track ${trackIndex}: ${track.label || track.id}`);
-                              } else {
-                                console.warn(`⚠️ Track ${trackIndex} is not live: ${track.readyState}`);
-                              }
-                            });
+                      if (localParticipant?.stream) {
+                        const audioTracks = localParticipant.stream.getAudioTracks();
+                        audioTracks.forEach((track, index) => {
+                          if (track.readyState === 'live') {
+                            track.enabled = true;
+                            unmutedTrackCount++;
+                            console.log(`🔊 Unmuted localParticipant track ${index}: ${track.label || track.id}`);
+                          } else {
+                            console.warn(`⚠️ Cannot unmute dead track ${index}: ${track.readyState}`);
                           }
                         });
-                        
-                        // 3. Restart audio monitoring after tracks are ready
-                        setTimeout(() => {
-                          if (localParticipant?.isAudioEnabled) {
-                            setupAudioMonitoring();
-                            console.log(`🎤 Audio monitoring restarted for unmuted mic`);
+                      }
+                      
+                      if (localMedia.state.localStream) {
+                        const audioTracks = localMedia.state.localStream.getAudioTracks();
+                        audioTracks.forEach((track, index) => {
+                          if (track.readyState === 'live') {
+                            track.enabled = true;
+                            unmutedTrackCount++;
+                            console.log(`🔊 Unmuted localMedia track ${index}: ${track.label || track.id}`);
+                          } else {
+                            console.warn(`⚠️ Cannot unmute dead track ${index}: ${track.readyState}`);
                           }
-                        }, 200);
-                      }, 100);
+                        });
+                      }
+                      
+                      console.log(`✅ Direct unmute completed - ${unmutedTrackCount} tracks enabled`);
+                      
+                      // Update our direct mute state
+                      setIsDirectlyMuted(false);
+                      
+                      // Restart audio monitoring after unmuting
+                      setTimeout(() => {
+                        // Check if we actually have enabled tracks before starting monitoring
+                        const hasEnabledTracks = [
+                          ...(localParticipant?.stream?.getAudioTracks() || []),
+                          ...(localMedia.state.localStream?.getAudioTracks() || [])
+                        ].some(track => track.enabled && track.readyState === 'live');
+                        
+                        if (hasEnabledTracks) {
+                          setupAudioMonitoring();
+                          console.log(`🎤 Audio monitoring restarted`);
+                        } else {
+                          console.warn(`⚠️ No enabled tracks found - skipping audio monitoring`);
+                        }
+                      }, 200);
                     }
                     
                   } catch (error) {
-                    console.error('❌ Error toggling microphone:', error);
+                    console.error('❌ Error in direct mute control:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 relative ${
