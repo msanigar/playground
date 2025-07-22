@@ -486,65 +486,105 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     }
   }, [state.connectionStatus]);
 
-  // Apply preferred devices immediately when media actions become available
+  // Apply preferred devices when Whereby's device state is actually populated
   useEffect(() => {
     const { cameraDeviceId, microphoneDeviceId } = devicePreferences;
     const { setCameraDevice, setMicrophoneDevice } = localMedia.actions;
+    const { currentCameraDeviceId, currentMicrophoneDeviceId, cameraDevices, microphoneDevices } = localMedia.state;
     
     // Only run this once to avoid conflicts
     if (hasSetInitialDevices) return;
     
-    // Apply preferences as soon as the actions are available, without waiting for device enumeration
+    // Wait for ALL conditions to be met:
+    // 1. Connected to room
+    // 2. Local participant exists with stream
+    // 3. Whereby's device state is populated (not undefined)
+    // 4. Device lists are available
+    if (
+      state.connectionStatus !== 'connected' || 
+      !localParticipant?.stream ||
+      currentCameraDeviceId === undefined ||
+      currentMicrophoneDeviceId === undefined ||
+      cameraDevices.length === 0 ||
+      microphoneDevices.length === 0
+    ) {
+      console.log(`⏳ Waiting for device state: connected=${state.connectionStatus === 'connected'}, hasStream=${!!localParticipant?.stream}, camera=${currentCameraDeviceId}, mic=${currentMicrophoneDeviceId}, devices=${cameraDevices.length}/${microphoneDevices.length}`);
+      return;
+    }
+    
+    console.log(`🔧 Device state ready - applying preferences...`);
+    
+    // Apply preferences when everything is ready
     const applyDevicePreferences = async () => {
       let deviceChangeNeeded = false;
       
       try {
-        // Apply camera preference immediately if we have one
-        if (cameraDeviceId && setCameraDevice) {
-          console.log(`🎥 Applying preferred camera: ${cameraDeviceId}`);
-          console.log(`🎥 Current camera before change: ${localMedia.state.currentCameraDeviceId}`);
-          await setCameraDevice(cameraDeviceId);
-          deviceChangeNeeded = true;
-          console.log(`🎥 Current camera after change: ${localMedia.state.currentCameraDeviceId}`);
+        // Apply camera preference if we have one and it's different from current
+        if (cameraDeviceId && setCameraDevice && cameraDeviceId !== currentCameraDeviceId) {
+          const cameraExists = cameraDevices.some(d => d.deviceId === cameraDeviceId);
+          if (cameraExists) {
+            console.log(`🎥 Applying preferred camera: ${cameraDeviceId}`);
+            console.log(`🎥 Current camera before change: ${currentCameraDeviceId}`);
+            await setCameraDevice(cameraDeviceId);
+            deviceChangeNeeded = true;
+            
+            // Verify the change after a delay
+            setTimeout(() => {
+              console.log(`🎥 Current camera after change: ${localMedia.state.currentCameraDeviceId}`);
+            }, 500);
+          } else {
+            console.warn(`🎥 Preferred camera not found: ${cameraDeviceId}`);
+          }
         } else {
-          console.log(`🎥 No camera preference saved or setCameraDevice not available`);
+          console.log(`🎥 Skipping camera: saved=${cameraDeviceId}, current=${currentCameraDeviceId}, same=${cameraDeviceId === currentCameraDeviceId}`);
         }
         
-        // Apply microphone preference immediately if we have one  
-        if (microphoneDeviceId && setMicrophoneDevice) {
-          console.log(`🎤 Applying preferred microphone: ${microphoneDeviceId}`);
-          console.log(`🎤 Current microphone before change: ${localMedia.state.currentMicrophoneDeviceId}`);
-          await setMicrophoneDevice(microphoneDeviceId);
-          deviceChangeNeeded = true;
-          console.log(`🎤 Current microphone after change: ${localMedia.state.currentMicrophoneDeviceId}`);
+        // Apply microphone preference if we have one and it's different from current
+        if (microphoneDeviceId && setMicrophoneDevice && microphoneDeviceId !== 'default' && microphoneDeviceId !== currentMicrophoneDeviceId) {
+          const micExists = microphoneDevices.some(d => d.deviceId === microphoneDeviceId);
+          if (micExists) {
+            console.log(`🎤 Applying preferred microphone: ${microphoneDeviceId}`);
+            console.log(`🎤 Current microphone before change: ${currentMicrophoneDeviceId}`);
+            await setMicrophoneDevice(microphoneDeviceId);
+            deviceChangeNeeded = true;
+            
+            // Verify the change after a delay
+            setTimeout(() => {
+              console.log(`🎤 Current microphone after change: ${localMedia.state.currentMicrophoneDeviceId}`);
+            }, 500);
+          } else {
+            console.warn(`🎤 Preferred microphone not found: ${microphoneDeviceId}`);
+          }
         } else {
-          console.log(`🎤 No microphone preference saved or setMicrophoneDevice not available`);
+          console.log(`🎤 Skipping microphone: saved=${microphoneDeviceId}, current=${currentMicrophoneDeviceId}, same=${microphoneDeviceId === currentMicrophoneDeviceId}`);
         }
         
         if (deviceChangeNeeded) {
-          console.log('✅ Device preferences applied immediately');
+          console.log('✅ Device preferences applied successfully');
+        } else {
+          console.log('ℹ️ No device changes needed');
         }
         
         setHasSetInitialDevices(true);
       } catch (error) {
-        console.warn('Failed to apply device preferences:', error);
-        // Still mark as set to avoid retrying
+        console.error('❌ Failed to apply device preferences:', error);
         setHasSetInitialDevices(true);
       }
     };
     
-    // Apply preferences after a short delay to ensure Whereby is ready
-    const timer = setTimeout(() => {
-      applyDevicePreferences();
-    }, 200);
-    
-    return () => clearTimeout(timer);
+    applyDevicePreferences();
   }, [
+    state.connectionStatus,
+    localParticipant?.stream,
     hasSetInitialDevices,
     devicePreferences.cameraDeviceId,
     devicePreferences.microphoneDeviceId,
     localMedia.actions.setCameraDevice,
-    localMedia.actions.setMicrophoneDevice
+    localMedia.actions.setMicrophoneDevice,
+    localMedia.state.currentCameraDeviceId,
+    localMedia.state.currentMicrophoneDeviceId,
+    localMedia.state.cameraDevices.length,
+    localMedia.state.microphoneDevices.length
   ]);
 
   // Log successful connection with media info (only once)
@@ -1021,12 +1061,61 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       console.log(`✅ Direct mute completed - ${mutedTrackCount} tracks disabled`);
                       console.log(`✅ Audio level forced to: 0%`);
                       
-                      // CRITICAL: Tell Whereby to stop audio publishing at WebRTC level
+                      // CRITICAL: Tell Whereby to stop audio publishing at WebRTC level  
                       try {
                         if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
                           console.log(`🔇 Stopping Whereby audio publishing`);
                           actions.toggleMicrophone();
+                          
+                          // Wait and verify the toggle worked
+                          setTimeout(() => {
+                            const isStillEnabled = localParticipant?.isAudioEnabled;
+                            console.log(`🔍 After Whereby toggle - Audio still enabled: ${isStillEnabled}`);
+                            
+                            if (isStillEnabled) {
+                              console.warn(`⚠️ Whereby toggle failed, trying again`);
+                              actions.toggleMicrophone();
+                            }
+                          }, 100);
                         }
+                        
+                        // NUCLEAR OPTION: Remove audio from the WebRTC sender if available
+                        try {
+                          // Access the underlying WebRTC connection if possible
+                          if (localParticipant?.stream) {
+                            const stream = localParticipant.stream;
+                            
+                            // Create an empty audio track as replacement
+                            const audioContext = new AudioContext();
+                            const oscillator = audioContext.createOscillator();
+                            const dest = audioContext.createMediaStreamDestination();
+                            oscillator.connect(dest);
+                            oscillator.start();
+                            oscillator.stop(); // Immediately stop to create silence
+                            
+                            const silentTrack = dest.stream.getAudioTracks()[0];
+                            
+                            // Replace all audio tracks with silent track
+                            const audioTracks = stream.getAudioTracks();
+                            audioTracks.forEach(track => {
+                              try {
+                                stream.removeTrack(track);
+                                console.log(`🔇 Removed audio track: ${track.label}`);
+                              } catch (e) {
+                                console.warn('Failed to remove track:', e);
+                              }
+                            });
+                            
+                            // Add the silent track
+                            stream.addTrack(silentTrack);
+                            console.log(`🔇 Added silent audio track`);
+                            
+                            audioContext.close();
+                          }
+                        } catch (error) {
+                          console.warn('Failed to apply nuclear audio muting:', error);
+                        }
+                        
                       } catch (error) {
                         console.warn('Failed to toggle Whereby microphone:', error);
                       }
