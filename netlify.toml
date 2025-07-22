@@ -6,7 +6,7 @@
   publish = "dist"
   
   # Node version and package manager configuration  
-  environment = { NODE_VERSION = "18.20.8", NPM_FLAGS = "--legacy-peer-deps --include=optional", YARN_ENABLE = "false", NPM_CONFIG_CACHE = "/tmp/.npm" }
+  environment = { NODE_VERSION = "18.20.8", NPM_FLAGS = "--legacy-peer-deps --include=optional", YARN_ENABLE = "false", NPM_CONFIG_CACHE = "/tmp/.npm", NPM_CONFIG_OPTIONAL = "true" }
 
 # SPA redirect - all routes should serve index.html
 [[redirects]]
