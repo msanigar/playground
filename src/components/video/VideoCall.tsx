@@ -798,6 +798,38 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     }, 100);
   }, [onLeave]); // Simplified dependencies
 
+  // Enhanced debugging function for WebRTC state
+  const logWebRTCState = useCallback((context: string) => {
+    console.log(`🔬 [${context}] WebRTC State Analysis:`);
+    
+    // Track state in localParticipant stream
+    if (localParticipant?.stream) {
+      const audioTracks = localParticipant.stream.getAudioTracks();
+      console.log(`  📡 localParticipant.stream:`);
+      audioTracks.forEach((track, i) => {
+        console.log(`    🎵 Track ${i}: ${track.label} | enabled=${track.enabled} | readyState=${track.readyState} | muted=${track.muted}`);
+      });
+    }
+    
+    // Track state in localMedia stream  
+    if (localMedia.state.localStream) {
+      const audioTracks = localMedia.state.localStream.getAudioTracks();
+      console.log(`  📱 localMedia.localStream:`);
+      audioTracks.forEach((track, i) => {
+        console.log(`    🎵 Track ${i}: ${track.label} | enabled=${track.enabled} | readyState=${track.readyState} | muted=${track.muted}`);
+      });
+    }
+    
+    // Whereby's internal state
+    console.log(`  🏢 Whereby State: isAudioEnabled=${localParticipant?.isAudioEnabled}, actualMicEnabled=${actualMicEnabled}, isDirectlyMuted=${isDirectlyMuted}`);
+    
+    // Browser tab info
+    console.log(`  🌐 Browser: isIncognito=${window.navigator.webdriver}, tabHidden=${document.hidden}`);
+    
+    // Device collision state
+    console.log(`  🚨 Collision: deviceCollisionDetected=${deviceCollisionDetected}, showFeedbackWarning=${showFeedbackWarning}`);
+  }, [localParticipant, localMedia.state.localStream, actualMicEnabled, isDirectlyMuted, deviceCollisionDetected, showFeedbackWarning]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
       <div className={`backdrop-blur-xl bg-white/10 rounded-3xl shadow-2xl border border-white/20 w-full ${
@@ -1027,6 +1059,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                     const wasEnabled = actualMicEnabled;
                     console.log(`🎤 Direct mute control: ${wasEnabled ? 'muting' : 'unmuting'}`);
                     
+                    // DEBUG: Log state before any changes
+                    logWebRTCState('BEFORE_MUTE_CHANGE');
+                    
                     if (wasEnabled) {
                       // MUTING - Pure track control approach (no Whereby toggle)
                       console.log(`🔇 Pure track muting - bypassing Whereby API completely`);
@@ -1063,62 +1098,68 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       // Update our direct mute state
                       setIsDirectlyMuted(true);
                       
-                                          } else {
-                        // UNMUTING - Pure track control approach (no Whereby toggle)
-                        console.log(`🔊 Pure track unmuting - just re-enabling tracks`);
+                      // DEBUG: Log state after muting
+                      setTimeout(() => logWebRTCState('AFTER_MUTE'), 100);
+                      
+                    } else {
+                      // UNMUTING - Pure track control approach (no Whereby toggle)
+                      console.log(`🔊 Pure track unmuting - just re-enabling tracks`);
+                      
+                      try {
+                        // Simply re-enable all audio tracks
+                        let unmutedTrackCount = 0;
                         
-                        try {
-                          // Simply re-enable all audio tracks
-                          let unmutedTrackCount = 0;
-                          
-                          if (localParticipant?.stream) {
-                            const audioTracks = localParticipant.stream.getAudioTracks();
-                            audioTracks.forEach((track, index) => {
-                              if (track.readyState === 'live') {
-                                track.enabled = true;
-                                unmutedTrackCount++;
-                                console.log(`🔊 ENABLED localParticipant track ${index}: ${track.label || track.id}`);
-                              } else {
-                                console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
-                              }
-                            });
-                          }
-                          
-                          if (localMedia.state.localStream) {
-                            const audioTracks = localMedia.state.localStream.getAudioTracks();
-                            audioTracks.forEach((track, index) => {
-                              if (track.readyState === 'live') {
-                                track.enabled = true;
-                                unmutedTrackCount++;
-                                console.log(`🔊 ENABLED localMedia track ${index}: ${track.label || track.id}`);
-                              } else {
-                                console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
-                              }
-                            });
-                          }
-                          
-                          console.log(`✅ Pure track unmute completed - ${unmutedTrackCount} tracks enabled`);
-                          console.log(`ℹ️ Skipping Whereby toggle - using pure track control`);
-                          
-                          // Update our direct mute state
-                          setIsDirectlyMuted(false);
-                          
-                          // Restart audio monitoring after a brief delay
-                          setTimeout(() => {
-                            if (unmutedTrackCount > 0) {
-                              setupAudioMonitoring();
-                              console.log(`✅ Audio monitoring restarted with ${unmutedTrackCount} tracks`);
+                        if (localParticipant?.stream) {
+                          const audioTracks = localParticipant.stream.getAudioTracks();
+                          audioTracks.forEach((track, index) => {
+                            if (track.readyState === 'live') {
+                              track.enabled = true;
+                              unmutedTrackCount++;
+                              console.log(`🔊 ENABLED localParticipant track ${index}: ${track.label || track.id}`);
                             } else {
-                              console.warn(`⚠️ No tracks available for monitoring`);
+                              console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
                             }
-                          }, 200);
-                          
-                        } catch (error) {
-                          console.error(`❌ Error during pure track unmuting:`, error);
-                          setIsDirectlyMuted(false); // Reset state even if error
+                          });
                         }
+                        
+                        if (localMedia.state.localStream) {
+                          const audioTracks = localMedia.state.localStream.getAudioTracks();
+                          audioTracks.forEach((track, index) => {
+                            if (track.readyState === 'live') {
+                              track.enabled = true;
+                              unmutedTrackCount++;
+                              console.log(`🔊 ENABLED localMedia track ${index}: ${track.label || track.id}`);
+                            } else {
+                              console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
+                            }
+                          });
+                        }
+                        
+                        console.log(`✅ Pure track unmute completed - ${unmutedTrackCount} tracks enabled`);
+                        console.log(`ℹ️ Skipping Whereby toggle - using pure track control`);
+                        
+                        // Update our direct mute state
+                        setIsDirectlyMuted(false);
+                        
+                        // DEBUG: Log state after unmuting
+                        setTimeout(() => logWebRTCState('AFTER_UNMUTE'), 100);
+                        
+                        // Restart audio monitoring after a brief delay
+                        setTimeout(() => {
+                          if (unmutedTrackCount > 0) {
+                            setupAudioMonitoring();
+                            console.log(`✅ Audio monitoring restarted with ${unmutedTrackCount} tracks`);
+                          } else {
+                            console.warn(`⚠️ No tracks available for monitoring`);
+                          }
+                        }, 200);
+                        
+                      } catch (error) {
+                        console.error(`❌ Error during pure track unmuting:`, error);
+                        setIsDirectlyMuted(false); // Reset state even if error
                       }
-                    
+                    }
+                  
                   } catch (error) {
                     console.error('❌ Error in direct mute control:', error);
                   }
