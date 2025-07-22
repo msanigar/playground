@@ -1,12 +1,12 @@
 [build]
   # Build command for Vite
-  command = "npm run build"
+  command = "npm ci && npm run build"
   
   # Directory to publish (Vite outputs to 'dist')
   publish = "dist"
   
-  # Node version (specify a stable version)
-  environment = { NODE_VERSION = "18" }
+  # Node version and package manager configuration
+  environment = { NODE_VERSION = "18", NPM_FLAGS = "--legacy-peer-deps", YARN_ENABLE = "false" }
 
 # SPA redirect - all routes should serve index.html
 [[redirects]]

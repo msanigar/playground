@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { WherebyProvider } from '@whereby.com/browser-sdk/react';
 import MediaSetup from '../components/video/MediaSetup';
 import VideoCall from '../components/video/VideoCall';

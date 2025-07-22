@@ -10,6 +10,11 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react/jsx-runtime'],
   },
+  build: {
+    rollupOptions: {
+      external: ['rtcstats'],
+    },
+  },
   define: {
     // Fix for libraries that reference process.env
     'process.env': {},
