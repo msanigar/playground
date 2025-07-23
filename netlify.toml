@@ -41,7 +41,7 @@
       style-src 'self' 'unsafe-inline';
       img-src 'self' data: *.unsplash.com *.whereby.com *.whereby.dev;
       media-src 'self' blob: *.whereby.com *.whereby.dev;
-      connect-src 'self' *.whereby.com *.whereby.dev *.unsplash.com api.open-meteo.com api.quotable.io zenquotes.io nominatim.openstreetmap.org *.bigdatacloud.net *.supabase.co ws: wss:;
+      connect-src 'self' *.whereby.com *.whereby.dev *.unsplash.com api.open-meteo.com api.quotable.io zenquotes.io nominatim.openstreetmap.org *.bigdatacloud.net api-bdc.io *.supabase.co ws: wss:;
       frame-src *.whereby.com *.whereby.dev;
       worker-src 'self' blob:;
     """

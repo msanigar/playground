@@ -194,7 +194,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
           try {
             // First try: BigDataCloud (free, no API key, CORS enabled)
             const locationResponse = await axios.get(
-              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.latitude}&longitude=${coords.longitude}&localityLanguage=en`,
+              `https://api-bdc.io/data/reverse-geocode-client?latitude=${coords.latitude}&longitude=${coords.longitude}&localityLanguage=en`,
               { timeout: 5000 }
             );
             
@@ -216,10 +216,8 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
               const fallbackResponse = await axios.get(
                 `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.latitude}&lon=${coords.longitude}&zoom=10&addressdetails=1`,
                 { 
-                  timeout: 5000,
-                  headers: {
-                    'User-Agent': 'Now Dashboard App'
-                  }
+                  timeout: 5000
+                  // Removed User-Agent header as browsers block it
                 }
               );
               
@@ -236,7 +234,28 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
               }
             } catch (fallbackError) {
               console.warn('Fallback location service also failed:', fallbackError);
-              // Keep default 'Current Location'
+              
+              try {
+                // Third fallback: Alternative BigDataCloud endpoint
+                const thirdResponse = await axios.get(
+                  `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.latitude}&longitude=${coords.longitude}&localityLanguage=en`,
+                  { timeout: 5000 }
+                );
+                
+                if (thirdResponse.data) {
+                  const location = thirdResponse.data;
+                  if (location.city && location.countryName) {
+                    locationName = `${location.city}, ${location.countryName}`;
+                  } else if (location.locality && location.countryName) {
+                    locationName = `${location.locality}, ${location.countryName}`;
+                  } else if (location.countryName) {
+                    locationName = location.countryName;
+                  }
+                }
+              } catch (finalError) {
+                console.warn('All location services failed:', finalError);
+                // Keep default 'Current Location'
+              }
             }
           }
 
