@@ -94,44 +94,72 @@ async function fetchDailyQuote(): Promise<QuoteData> {
     return { text: cached, author: cachedAuthor };
   }
 
-  try {
-    // Use Quotable API which supports CORS and is actively maintained
-    const response = await axios.get('https://api.quotable.io/random', {
-      params: {
-        minLength: 50,
-        maxLength: 200
-      },
-      timeout: 10000 // 10 second timeout
-    });
-    
-    const quoteData: QuoteData = {
-      text: response.data.content,
-      author: response.data.author,
-    };
+  // Try multiple quote APIs with better error handling
+  const quoteSources = [
+    // ZenQuotes API - reliable alternative
+    async () => {
+      const response = await axios.get('https://zenquotes.io/api/random', {
+        timeout: 8000
+      });
+      const data = response.data[0];
+      return {
+        text: data.q,
+        author: data.a === 'zenquotes.io' ? 'Unknown' : data.a
+      };
+    },
+    // Quotable API as backup (if certificate issues are resolved)
+    async () => {
+      const response = await axios.get('https://api.quotable.io/random', {
+        params: {
+          minLength: 50,
+          maxLength: 200
+        },
+        timeout: 8000
+      });
+      return {
+        text: response.data.content,
+        author: response.data.author
+      };
+    }
+  ];
 
-    localStorage.setItem('quote_cache', response.data.content);
-    localStorage.setItem('quote_cache_author', response.data.author);
-    localStorage.setItem('quote_cache_date', today);
-    
-    return quoteData;
-  } catch (error) {
-    console.warn('Failed to fetch quote from primary API:', error);
-    
-    // Fallback to local quotes if API fails
-    const fallbackQuotes = [
-      { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
-      { text: "It is during our darkest moments that we must focus to see the light.", author: "Aristotle" },
-      { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
-      { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
-      { text: "Innovation distinguishes between a leader and a follower.", author: "Steve Jobs" },
-      { text: "Life is what happens to you while you're busy making other plans.", author: "John Lennon" },
-      { text: "The future belongs to those who prepare for it today.", author: "Malcolm X" },
-      { text: "Be yourself; everyone else is already taken.", author: "Oscar Wilde" }
-    ];
-    
-    const randomQuote = fallbackQuotes[Math.floor(Math.random() * fallbackQuotes.length)];
-    return randomQuote;
+  // Try each API source
+  for (const [index, fetchSource] of quoteSources.entries()) {
+    try {
+      const quoteData = await fetchSource();
+      
+      if (quoteData.text && quoteData.author) {
+        localStorage.setItem('quote_cache', quoteData.text);
+        localStorage.setItem('quote_cache_author', quoteData.author);
+        localStorage.setItem('quote_cache_date', today);
+        return quoteData;
+      }
+    } catch (error) {
+      // Only log the first API failure to reduce console spam
+      if (index === 0) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.warn('Quote API failed, trying alternatives...', errorMessage);
+      }
+      continue; // Try next API
+    }
   }
+  
+  // All APIs failed, use local fallback quotes
+  const fallbackQuotes = [
+    { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
+    { text: "It is during our darkest moments that we must focus to see the light.", author: "Aristotle" },
+    { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+    { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+    { text: "Innovation distinguishes between a leader and a follower.", author: "Steve Jobs" },
+    { text: "Life is what happens to you while you're busy making other plans.", author: "John Lennon" },
+    { text: "The future belongs to those who prepare for it today.", author: "Malcolm X" },
+    { text: "Be yourself; everyone else is already taken.", author: "Oscar Wilde" },
+    { text: "The only impossible journey is the one you never begin.", author: "Tony Robbins" },
+    { text: "In the midst of winter, I found there was, within me, an invincible summer.", author: "Albert Camus" }
+  ];
+  
+  const randomQuote = fallbackQuotes[Math.floor(Math.random() * fallbackQuotes.length)];
+  return randomQuote;
 }
 
 async function fetchWeatherData(): Promise<WeatherData | null> {

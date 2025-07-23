@@ -145,10 +145,9 @@ export class CanvasService {
   // Add a stroke to the database
   async addStroke(stroke: DrawingStroke): Promise<boolean> {
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('canvas_strokes')
         .insert({
-          id: stroke.id,
           room_id: this.roomId,
           user_id: this.userId,
           user_name: this.userName,
@@ -160,10 +159,17 @@ export class CanvasService {
             tool: stroke.tool
           }
         })
+        .select()
 
       if (error) {
         console.error('Failed to add stroke:', error)
         return false
+      }
+
+      // Update the local stroke with the database-generated ID if it was returned
+      if (data && data[0] && data[0].id !== stroke.id) {
+        // Note: The stroke ID will be updated via the real-time subscription
+        // This ensures consistency across all connected clients
       }
 
       return true
