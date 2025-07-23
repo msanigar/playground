@@ -184,21 +184,29 @@ export default function Canvas() {
     };
   }, [canvasId, currentUser.id, currentUser.name, currentUser.color]);
 
-  // Handle completed strokes - save to Supabase
+  // Handle completed strokes - save to Supabase (prevent duplicate saves)
+  const savedStrokeIds = useRef<Set<string>>(new Set());
+  
   useEffect(() => {
     const unsubscribe = useCanvasStore.subscribe(
       (state) => {
         const completedStrokes = state.strokes.filter(s => 
           s.completed && 
           s.userId === currentUser.id && 
-          !s.id.includes('temp-') // Skip temporary strokes
+          !s.id.includes('temp-') && // Skip temporary strokes
+          !savedStrokeIds.current.has(s.id) // Skip already saved strokes
         );
         
         completedStrokes.forEach(async (stroke) => {
           if (canvasServiceRef.current && isConnected) {
+            // Mark as being saved to prevent duplicates
+            savedStrokeIds.current.add(stroke.id);
+            
             const success = await canvasServiceRef.current.addStroke(stroke);
             if (!success) {
               console.warn('Failed to save stroke to Supabase');
+              // Remove from saved set if it failed, so we can retry
+              savedStrokeIds.current.delete(stroke.id);
             }
           }
         });
@@ -265,9 +273,13 @@ export default function Canvas() {
       const success = await canvasServiceRef.current.clearCanvas();
       if (success) {
         clearCanvas();
+        // Clear saved stroke tracking when canvas is cleared
+        savedStrokeIds.current.clear();
       }
     } else {
       clearCanvas();
+      // Clear saved stroke tracking when canvas is cleared
+      savedStrokeIds.current.clear();
     }
   }, [isConnected, clearCanvas]);
 
@@ -279,9 +291,15 @@ export default function Canvas() {
       const success = await canvasServiceRef.current.deleteStroke(lastStroke.id);
       if (success) {
         undoLastStroke();
+        // Remove from saved tracking when stroke is deleted
+        savedStrokeIds.current.delete(lastStroke.id);
       }
     } else {
       undoLastStroke();
+      // Remove from saved tracking when stroke is deleted locally
+      if (lastStroke) {
+        savedStrokeIds.current.delete(lastStroke.id);
+      }
     }
   }, [strokes, currentUser.id, isConnected, undoLastStroke]);
 
