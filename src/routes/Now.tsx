@@ -87,65 +87,15 @@ async function fetchDailyQuote(): Promise<QuoteData> {
   const cacheDate = localStorage.getItem('quote_cache_date');
   const today = new Date().toISOString().slice(0, 10);
 
-  // Simulate network delay
+  // Simulate network delay for consistent UX
   await new Promise(resolve => setTimeout(resolve, Math.random() * 800 + 300));
 
   if (cached && cachedAuthor && cacheDate === today) {
     return { text: cached, author: cachedAuthor };
   }
 
-  // Try multiple quote APIs with better error handling
-  const quoteSources = [
-    // ZenQuotes API - reliable alternative
-    async () => {
-      const response = await axios.get('https://zenquotes.io/api/random', {
-        timeout: 8000
-      });
-      const data = response.data[0];
-      return {
-        text: data.q,
-        author: data.a === 'zenquotes.io' ? 'Unknown' : data.a
-      };
-    },
-    // Quotable API as backup (if certificate issues are resolved)
-    async () => {
-      const response = await axios.get('https://api.quotable.io/random', {
-        params: {
-          minLength: 50,
-          maxLength: 200
-        },
-        timeout: 8000
-      });
-      return {
-        text: response.data.content,
-        author: response.data.author
-      };
-    }
-  ];
-
-  // Try each API source
-  for (const [index, fetchSource] of quoteSources.entries()) {
-    try {
-      const quoteData = await fetchSource();
-      
-      if (quoteData.text && quoteData.author) {
-        localStorage.setItem('quote_cache', quoteData.text);
-        localStorage.setItem('quote_cache_author', quoteData.author);
-        localStorage.setItem('quote_cache_date', today);
-        return quoteData;
-      }
-    } catch (error) {
-      // Only log the first API failure to reduce console spam
-      if (index === 0) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.warn('Quote API failed, trying alternatives...', errorMessage);
-      }
-      continue; // Try next API
-    }
-  }
-  
-  // All APIs failed, use local fallback quotes
-  const fallbackQuotes = [
+  // Use local quotes collection to avoid all API issues
+  const inspirationalQuotes = [
     { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
     { text: "It is during our darkest moments that we must focus to see the light.", author: "Aristotle" },
     { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
@@ -155,11 +105,29 @@ async function fetchDailyQuote(): Promise<QuoteData> {
     { text: "The future belongs to those who prepare for it today.", author: "Malcolm X" },
     { text: "Be yourself; everyone else is already taken.", author: "Oscar Wilde" },
     { text: "The only impossible journey is the one you never begin.", author: "Tony Robbins" },
-    { text: "In the midst of winter, I found there was, within me, an invincible summer.", author: "Albert Camus" }
+    { text: "In the midst of winter, I found there was, within me, an invincible summer.", author: "Albert Camus" },
+    { text: "Yesterday is history, tomorrow is a mystery, today is a gift of God, which is why we call it the present.", author: "Eleanor Roosevelt" },
+    { text: "The best time to plant a tree was 20 years ago. The second best time is now.", author: "Chinese Proverb" },
+    { text: "Your limitation—it's only your imagination.", author: "Unknown" },
+    { text: "Push yourself, because no one else is going to do it for you.", author: "Unknown" },
+    { text: "Great things never come from comfort zones.", author: "Unknown" },
+    { text: "Dream it. Wish it. Do it.", author: "Unknown" },
+    { text: "Success doesn't just find you. You have to go out and get it.", author: "Unknown" },
+    { text: "The harder you work for something, the greater you'll feel when you achieve it.", author: "Unknown" },
+    { text: "Dream bigger. Do bigger.", author: "Unknown" },
+    { text: "Don't stop when you're tired. Stop when you're done.", author: "Unknown" }
   ];
   
-  const randomQuote = fallbackQuotes[Math.floor(Math.random() * fallbackQuotes.length)];
-  return randomQuote;
+  // Select quote based on date to ensure same quote per day
+  const dayOfYear = Math.floor((new Date().getTime() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
+  const selectedQuote = inspirationalQuotes[dayOfYear % inspirationalQuotes.length];
+  
+  // Cache the selected quote
+  localStorage.setItem('quote_cache', selectedQuote.text);
+  localStorage.setItem('quote_cache_author', selectedQuote.author);
+  localStorage.setItem('quote_cache_date', today);
+  
+  return selectedQuote;
 }
 
 async function fetchWeatherData(): Promise<WeatherData | null> {
@@ -185,14 +153,28 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
 
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
-      console.warn('Geolocation not supported');
+      console.warn('🌍 Geolocation not supported by this browser');
       resolve(null);
       return;
     }
+
+    // Check current permission state if available
+    if ('permissions' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' })
+        .then(permissionStatus => {
+          console.log('🌍 Geolocation permission status:', permissionStatus.state);
+          if (permissionStatus.state === 'denied') {
+            console.warn('🌍 Geolocation permission was previously denied. Please enable location access in browser settings.');
+          }
+        })
+        .catch(err => console.log('🌍 Could not check permission status:', err));
+    }
     
     console.log('🌍 Requesting location permission...');
+    
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
+        console.log('🌍 Location permission granted! Coords:', coords.latitude.toFixed(4), coords.longitude.toFixed(4));
         try {
           // Get weather data from open-meteo (free, no API key required, CORS enabled)
           const weatherResponse = await axios.get('https://api.open-meteo.com/v1/forecast', {
@@ -200,14 +182,10 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
               latitude: coords.latitude,
               longitude: coords.longitude,
               current_weather: true,
+              timezone: 'auto',
             },
-            timeout: 10000 // 10 second timeout
+            timeout: 10000,
           });
-
-          if (!weatherResponse.data || !weatherResponse.data.current_weather) {
-            resolve(null);
-            return;
-          }
 
           const data = weatherResponse.data.current_weather;
           let locationName = 'Current Location';
@@ -269,6 +247,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
             location: locationName,
           };
 
+          console.log('🌍 Weather data fetched successfully:', locationName);
           localStorage.setItem(cacheKey, JSON.stringify(weatherData));
           localStorage.setItem(cacheDateKey, today);
           
@@ -279,7 +258,22 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
         }
       },
       (error) => {
-        console.warn('🌍 Geolocation failed:', error.message || error);
+        let errorMessage = '🌍 Geolocation failed';
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = '🌍 Location permission denied by user. Enable location access in browser settings to see weather info.';
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = '🌍 Location information unavailable. Check your internet connection.';
+            break;
+          case error.TIMEOUT:
+            errorMessage = '🌍 Location request timed out. Please try again.';
+            break;
+          default:
+            errorMessage = `🌍 Geolocation error: ${error.message || error}`;
+            break;
+        }
+        console.warn(errorMessage);
         resolve(null);
       },
       {
@@ -403,7 +397,27 @@ function QuoteSection({ quotePromise }: { quotePromise: Promise<QuoteData> }) {
 function WeatherSection({ weatherPromise }: { weatherPromise: Promise<WeatherData | null> }) {
   const weather = use(weatherPromise);
   
-  if (!weather) return null;
+  if (!weather) {
+    return (
+      <motion.div
+        className="mt-6 px-6 py-3 bg-white/10 border border-white/20 rounded-lg backdrop-blur-sm"
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ delay: 0.9, duration: 0.6 }}
+        whileHover={{ scale: 1.05 }}
+      >
+        <div className="flex items-center justify-center gap-3 text-sm text-white/90">
+          <span className="text-lg">📍</span>
+          <div className="text-center">
+            <div className="font-medium">Enable Location Access</div>
+            <div className="text-xs text-white/70 mt-1">
+              Allow location permission to see local weather
+            </div>
+          </div>
+        </div>
+      </motion.div>
+    );
+  }
   
   return (
     <motion.div
