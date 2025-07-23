@@ -95,25 +95,42 @@ async function fetchDailyQuote(): Promise<QuoteData> {
   }
 
   try {
-    // Use quotegarden.io API which supports CORS
-    const response = await axios.get('https://quote-garden.herokuapp.com/api/v3/quotes/random');
-    const quote = response.data.data;
+    // Use Quotable API which supports CORS and is actively maintained
+    const response = await axios.get('https://api.quotable.io/random', {
+      params: {
+        minLength: 50,
+        maxLength: 200
+      },
+      timeout: 10000 // 10 second timeout
+    });
     
     const quoteData: QuoteData = {
-      text: quote.quoteText,
-      author: quote.quoteAuthor,
+      text: response.data.content,
+      author: response.data.author,
     };
 
-    localStorage.setItem('quote_cache', quote.quoteText);
-    localStorage.setItem('quote_cache_author', quote.quoteAuthor);
+    localStorage.setItem('quote_cache', response.data.content);
+    localStorage.setItem('quote_cache_author', response.data.author);
     localStorage.setItem('quote_cache_date', today);
     
     return quoteData;
-  } catch {
-    return {
-      text: 'Make today count.',
-      author: 'Unknown',
-    };
+  } catch (error) {
+    console.warn('Failed to fetch quote from primary API:', error);
+    
+    // Fallback to local quotes if API fails
+    const fallbackQuotes = [
+      { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
+      { text: "It is during our darkest moments that we must focus to see the light.", author: "Aristotle" },
+      { text: "Success is not final, failure is not fatal: it is the courage to continue that counts.", author: "Winston Churchill" },
+      { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+      { text: "Innovation distinguishes between a leader and a follower.", author: "Steve Jobs" },
+      { text: "Life is what happens to you while you're busy making other plans.", author: "John Lennon" },
+      { text: "The future belongs to those who prepare for it today.", author: "Malcolm X" },
+      { text: "Be yourself; everyone else is already taken.", author: "Oscar Wilde" }
+    ];
+    
+    const randomQuote = fallbackQuotes[Math.floor(Math.random() * fallbackQuotes.length)];
+    return randomQuote;
   }
 }
 
@@ -147,36 +164,71 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         try {
-          // Get weather data and location name in parallel
-          const [weatherResponse, locationResponse] = await Promise.allSettled([
-            axios.get('https://api.open-meteo.com/v1/forecast', {
-              params: {
-                latitude: coords.latitude,
-                longitude: coords.longitude,
-                current_weather: true,
-              },
-            }),
-            // Reverse geocoding to get location name
-            axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.latitude}&longitude=${coords.longitude}&localityLanguage=en`)
-          ]);
+          // Get weather data from open-meteo (free, no API key required, CORS enabled)
+          const weatherResponse = await axios.get('https://api.open-meteo.com/v1/forecast', {
+            params: {
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              current_weather: true,
+            },
+            timeout: 10000 // 10 second timeout
+          });
 
-          if (weatherResponse.status === 'rejected') {
+          if (!weatherResponse.data || !weatherResponse.data.current_weather) {
             resolve(null);
             return;
           }
 
-          const data = weatherResponse.value.data.current_weather;
+          const data = weatherResponse.data.current_weather;
           let locationName = 'Current Location';
           
-          // Try to get actual location name
-          if (locationResponse.status === 'fulfilled') {
-            const location = locationResponse.value.data;
-            if (location.city && location.countryName) {
-              locationName = `${location.city}, ${location.countryName}`;
-            } else if (location.locality && location.countryName) {
-              locationName = `${location.locality}, ${location.countryName}`;
-            } else if (location.countryName) {
-              locationName = location.countryName;
+          // Try multiple location services for better reliability
+          try {
+            // First try: BigDataCloud (free, no API key, CORS enabled)
+            const locationResponse = await axios.get(
+              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${coords.latitude}&longitude=${coords.longitude}&localityLanguage=en`,
+              { timeout: 5000 }
+            );
+            
+            if (locationResponse.data) {
+              const location = locationResponse.data;
+              if (location.city && location.countryName) {
+                locationName = `${location.city}, ${location.countryName}`;
+              } else if (location.locality && location.countryName) {
+                locationName = `${location.locality}, ${location.countryName}`;
+              } else if (location.countryName) {
+                locationName = location.countryName;
+              }
+            }
+          } catch (locationError) {
+            console.warn('Primary location service failed, trying fallback:', locationError);
+            
+            try {
+              // Fallback: Nominatim (OpenStreetMap's service - free, CORS enabled)
+              const fallbackResponse = await axios.get(
+                `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.latitude}&lon=${coords.longitude}&zoom=10&addressdetails=1`,
+                { 
+                  timeout: 5000,
+                  headers: {
+                    'User-Agent': 'Now Dashboard App'
+                  }
+                }
+              );
+              
+              if (fallbackResponse.data && fallbackResponse.data.address) {
+                const addr = fallbackResponse.data.address;
+                const city = addr.city || addr.town || addr.village || addr.hamlet;
+                const country = addr.country;
+                
+                if (city && country) {
+                  locationName = `${city}, ${country}`;
+                } else if (country) {
+                  locationName = country;
+                }
+              }
+            } catch (fallbackError) {
+              console.warn('Fallback location service also failed:', fallbackError);
+              // Keep default 'Current Location'
             }
           }
 
@@ -191,11 +243,13 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
           localStorage.setItem(cacheDateKey, today);
           
           resolve(weatherData);
-        } catch {
+        } catch (error) {
+          console.warn('Weather data fetch failed:', error);
           resolve(null);
         }
       },
-      () => {
+      (error) => {
+        console.warn('Geolocation failed:', error);
         resolve(null);
       },
       {
