@@ -1,5 +1,5 @@
 import { supabase, type CanvasStroke, type CanvasCursor } from './supabase'
-import type { DrawingStroke, Collaborator } from '../state/canvas'
+import type { DrawingStroke } from '../state/canvas'
 
 export class CanvasService {
   private roomId: string
@@ -8,11 +8,8 @@ export class CanvasService {
   private userColor: string
   private onStrokeAdded?: (stroke: DrawingStroke) => void
   private onStrokeDeleted?: (strokeId: string) => void
-  private onCanvasCleared?: () => void
   private onCursorUpdated?: (userId: string, x: number, y: number, userName: string, userColor: string) => void
   private onCursorRemoved?: (userId: string) => void
-  private onUserJoined?: (user: Collaborator) => void
-  private onUserLeft?: (userId: string) => void
 
   private realtimeChannel: ReturnType<typeof supabase.channel> | null = null
   private cursorUpdateTimeout: NodeJS.Timeout | null = null
@@ -28,11 +25,8 @@ export class CanvasService {
   onEvents(handlers: {
     onStrokeAdded?: (stroke: DrawingStroke) => void
     onStrokeDeleted?: (strokeId: string) => void
-    onCanvasCleared?: () => void
     onCursorUpdated?: (userId: string, x: number, y: number, userName: string, userColor: string) => void
     onCursorRemoved?: (userId: string) => void
-    onUserJoined?: (user: Collaborator) => void
-    onUserLeft?: (userId: string) => void
   }) {
     Object.assign(this, handlers)
   }

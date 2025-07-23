@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import PartySocket from 'partysocket';
 import { useCanvasStore } from '../state/canvas';
-import type { CanvasOperation } from '../state/canvas';
+import { CanvasService } from '../lib/canvasService';
+import type { DrawingStroke } from '../state/canvas';
 
 export default function Canvas() {
   const {
@@ -14,8 +14,6 @@ export default function Canvas() {
     addCollaborator,
     removeCollaborator,
     updateCollaboratorCursor,
-    applyOperation,
-    confirmOptimisticOperation,
     loadCanvas,
     currentUser,
     startDrawing,
@@ -28,7 +26,7 @@ export default function Canvas() {
     undoLastStroke,
   } = useCanvasStore();
   
-  const partySocketRef = useRef<PartySocket | null>(null);
+  const canvasServiceRef = useRef<CanvasService | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [canvasId] = useState(() => {
     // Get room from URL or use default
@@ -84,191 +82,131 @@ export default function Canvas() {
     ctx.globalCompositeOperation = 'source-over';
   }, [strokes]);
 
-  // Real PartyKit WebSocket connection
+  // Supabase Canvas collaboration
   useEffect(() => {
-    const connectToPartyKit = async () => {
+    const connectToSupabase = async () => {
       try {
         setIsLoading(true);
         
-        // Load canvas data first
-        await loadCanvas(canvasId);
+        // Check if Supabase is configured
+        const hasSupabaseConfig = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_KEY;
         
-        // Check if we're in production/deployed environment
-        const isProduction = import.meta.env.PROD || window.location.hostname !== 'localhost';
-        
-        if (isProduction) {
-          console.log('🎨 Canvas running in offline mode (no real-time collaboration server configured)');
+        if (!hasSupabaseConfig) {
+          console.log('🎨 Canvas running in offline mode (Supabase not configured)');
           setConnected(false);
           setIsLoading(false);
+          await loadCanvas(canvasId);
           return;
         }
         
-        // Connect to PartyKit only in development
-        const socket = new PartySocket({
-          host: "localhost:1999", // Development server
-          room: canvasId,
+        // Create Supabase canvas service
+        const canvasService = new CanvasService(
+          canvasId,
+          currentUser.id,
+          currentUser.name,
+          currentUser.color
+        );
+        
+        // Set up event handlers
+        canvasService.onEvents({
+          onStrokeAdded: (stroke: DrawingStroke) => {
+            // Add stroke to local state (from other users)
+            useCanvasStore.setState((state) => ({
+              strokes: [...state.strokes, stroke]
+            }));
+          },
+          onStrokeDeleted: (strokeId: string) => {
+            // Remove stroke from local state
+            useCanvasStore.setState((state) => ({
+              strokes: state.strokes.filter(s => s.id !== strokeId)
+            }));
+          },
+          onCursorUpdated: (userId: string, x: number, y: number, userName: string, userColor: string) => {
+            // Update collaborator cursor
+            updateCollaboratorCursor(userId, x, y);
+            
+            // Add collaborator if not exists
+            const collaborator = collaborators.get(userId);
+            if (!collaborator) {
+              addCollaborator({
+                id: userId,
+                name: userName,
+                color: userColor,
+                cursor: { x, y },
+                lastSeen: Date.now(),
+                isDrawing: false
+              });
+            }
+          },
+          onCursorRemoved: (userId: string) => {
+            // Remove collaborator cursor
+            const collaborator = collaborators.get(userId);
+            if (collaborator) {
+              updateCollaboratorCursor(userId, 0, 0);
+              // Remove after a delay
+              setTimeout(() => removeCollaborator(userId), 1000);
+            }
+          }
         });
         
-        let connectionTimeout: number | null = null;
-        let hasConnected = false;
+        // Connect to Supabase
+        const connected = await canvasService.connect();
         
-        // Set a connection timeout
-        connectionTimeout = setTimeout(() => {
-          if (!hasConnected) {
-            console.log('🎨 Canvas collaboration server not available, running in offline mode');
-            socket.close();
-            setConnected(false);
-            setIsLoading(false);
-          }
-        }, 3000); // 3 second timeout
-        
-        socket.onopen = () => {
-          hasConnected = true;
-          if (connectionTimeout) {
-            clearTimeout(connectionTimeout);
-            connectionTimeout = null;
-          }
-          
+        if (connected) {
           console.log(`🎨 Connected to Canvas room: ${canvasId}`);
           setConnected(true);
-          
-          // Announce ourselves to other collaborators
-          const joinOperation: CanvasOperation = {
-            type: 'user-join',
-            user: {
-              id: currentUser.id,
-              name: currentUser.name,
-              color: currentUser.color,
-              isDrawing: false,
-            }
-          };
-          
-          socket.send(JSON.stringify(joinOperation));
-        };
-
-        socket.onmessage = (event) => {
-          try {
-            const operation: CanvasOperation = JSON.parse(event.data);
-            
-            // Don't process our own operations
-            if ('userId' in operation && operation.userId === currentUser.id) {
-              return;
-            }
-            
-            // Apply the operation to our local state
-            applyOperation(operation);
-            
-            // Handle specific operation types
-            switch (operation.type) {
-              case 'user-join':
-                addCollaborator({
-                  ...operation.user,
-                  cursor: null,
-                  lastSeen: Date.now(),
-                });
-                break;
-              case 'user-leave':
-                removeCollaborator(operation.userId);
-                break;
-              case 'cursor-move':
-                updateCollaboratorCursor(operation.userId, operation.x, operation.y);
-                break;
-              case 'cursor-leave':
-                // Handled by applyOperation above - no additional action needed
-                break;
-            }
-          } catch (error) {
-            console.error('Error processing Canvas operation:', error);
-          }
-        };
-        
-        socket.onclose = () => {
-          if (hasConnected) {
-            console.log('🔌 Disconnected from Canvas room');
-          }
+        } else {
+          console.log('🎨 Failed to connect to Supabase, running in offline mode');
           setConnected(false);
-          if (connectionTimeout) {
-            clearTimeout(connectionTimeout);
-          }
-        };
+          await loadCanvas(canvasId);
+        }
         
-        socket.onerror = (error) => {
-          if (hasConnected) {
-            console.error('❌ Canvas WebSocket error:', error);
-          }
-          setConnected(false);
-          if (connectionTimeout) {
-            clearTimeout(connectionTimeout);
-            setIsLoading(false);
-          }
-        };
-        
-        partySocketRef.current = socket;
+        canvasServiceRef.current = canvasService;
         setIsLoading(false);
         
       } catch (error) {
         console.error('❌ Failed to connect to Canvas collaboration:', error);
         setConnected(false);
         setIsLoading(false);
+        await loadCanvas(canvasId);
       }
     };
     
-    connectToPartyKit();
+    connectToSupabase();
     
     // Cleanup on unmount
     return () => {
-      if (partySocketRef.current) {
-        // Send leave message
-        const leaveOperation: CanvasOperation = {
-          type: 'user-leave',
-          userId: currentUser.id,
-        };
-        partySocketRef.current.send(JSON.stringify(leaveOperation));
-        partySocketRef.current.close();
-        partySocketRef.current = null;
+      if (canvasServiceRef.current) {
+        canvasServiceRef.current.disconnect();
+        canvasServiceRef.current = null;
       }
       setConnected(false);
     };
   }, [canvasId, currentUser.id, currentUser.name, currentUser.color]);
 
-  // Send operations to other collaborators
-  const broadcastOperation = useCallback((operation: CanvasOperation) => {
-    const socket = partySocketRef.current;
-    if (!socket || socket.readyState !== socket.OPEN) {
-      // Only log in development mode to avoid spam
-      if (import.meta.env.DEV && socket) {
-        console.warn('🔌 Socket not ready, operation will be local only');
-      }
-      return;
-    }
-    
-    try {
-      socket.send(JSON.stringify(operation));
-    } catch (error) {
-      if (import.meta.env.DEV) {
-        console.error('❌ Failed to send Canvas operation:', error);
-      }
-    }
-  }, []);
-
-  // Watch for new optimistic operations and broadcast them
+  // Handle completed strokes - save to Supabase
   useEffect(() => {
     const unsubscribe = useCanvasStore.subscribe(
       (state) => {
-        // Find operations that need to be sent
-        const operations = state.optimisticOperations;
-        operations.forEach(op => {
-          if (!op.confirmed) {
-            broadcastOperation(op.operation);
-            // Mark as confirmed (sent to server)
-            confirmOptimisticOperation(op.id);
+        const completedStrokes = state.strokes.filter(s => 
+          s.completed && 
+          s.userId === currentUser.id && 
+          !s.id.includes('temp-') // Skip temporary strokes
+        );
+        
+        completedStrokes.forEach(async (stroke) => {
+          if (canvasServiceRef.current && isConnected) {
+            const success = await canvasServiceRef.current.addStroke(stroke);
+            if (!success) {
+              console.warn('Failed to save stroke to Supabase');
+            }
           }
         });
       }
     );
     
     return unsubscribe;
-  }, [broadcastOperation, confirmOptimisticOperation]);
+  }, [currentUser.id, isConnected]);
 
   // Canvas mouse/touch event handlers
   const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -294,18 +232,15 @@ export default function Canvas() {
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getEventPosition(e);
     
-    // Broadcast cursor movement
-    broadcastOperation({
-      type: 'cursor-move',
-      userId: currentUser.id,
-      x,
-      y,
-    });
+    // Update cursor position in Supabase
+    if (canvasServiceRef.current && isConnected) {
+      canvasServiceRef.current.updateCursor(x, y);
+    }
     
     if (isDrawing) {
       continueDrawing(x, y);
     }
-  }, [getEventPosition, broadcastOperation, currentUser.id, isDrawing, continueDrawing]);
+  }, [getEventPosition, isConnected, isDrawing, continueDrawing]);
   
   const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
@@ -318,11 +253,37 @@ export default function Canvas() {
     if (isDrawing) {
       stopDrawing();
     }
-    broadcastOperation({
-      type: 'cursor-leave',
-      userId: currentUser.id,
-    });
-  }, [isDrawing, stopDrawing, broadcastOperation, currentUser.id]);
+    
+    // Remove cursor from Supabase
+    if (canvasServiceRef.current && isConnected) {
+      canvasServiceRef.current.removeCursor();
+    }
+  }, [isDrawing, stopDrawing, isConnected]);
+
+  const handleClearCanvas = useCallback(async () => {
+    if (canvasServiceRef.current && isConnected) {
+      const success = await canvasServiceRef.current.clearCanvas();
+      if (success) {
+        clearCanvas();
+      }
+    } else {
+      clearCanvas();
+    }
+  }, [isConnected, clearCanvas]);
+
+  const handleUndoLastStroke = useCallback(async () => {
+    const userStrokes = strokes.filter(s => s.userId === currentUser.id && s.completed);
+    const lastStroke = userStrokes[userStrokes.length - 1];
+    
+    if (lastStroke && canvasServiceRef.current && isConnected) {
+      const success = await canvasServiceRef.current.deleteStroke(lastStroke.id);
+      if (success) {
+        undoLastStroke();
+      }
+    } else {
+      undoLastStroke();
+    }
+  }, [strokes, currentUser.id, isConnected, undoLastStroke]);
 
   if (isLoading) {
     return (
@@ -337,131 +298,128 @@ export default function Canvas() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      {/* Header */}
-      <div className="border-b border-gray-200 bg-white">
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <h1 className="text-lg font-medium text-gray-900">Canvas</h1>
-              <div className="flex items-center space-x-2">
-                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span className="text-sm text-gray-600">
-                  {isConnected ? 'Connected' : 'Disconnected'}
-                </span>
-              </div>
+    <div className="min-h-screen bg-gray-50 relative overflow-hidden">
+      {/* Collaborators Panel */}
+      <div className="absolute top-4 left-4 z-20">
+        <div className="bg-white rounded-lg shadow-lg p-4 min-w-[200px]">
+          <h3 className="font-semibold text-gray-900 mb-3">Collaborators</h3>
+          <div className="space-y-2">
+            {/* Current User */}
+            <div className="flex items-center space-x-2">
+              <div 
+                className="w-3 h-3 rounded-full"
+                style={{ backgroundColor: currentUser.color }}
+              />
+              <span className="text-sm text-gray-700">{currentUser.name} (You)</span>
             </div>
             
-            {/* Collaborators */}
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">
-                {Array.from(collaborators.values()).length + 1} collaborator{Array.from(collaborators.values()).length === 0 ? '' : 's'}
-              </span>
-              <div className="flex -space-x-2">
-                {/* Current user */}
+            {/* Other Collaborators */}
+            {Array.from(collaborators.values()).map(collaborator => (
+              <div key={collaborator.id} className="flex items-center space-x-2">
                 <div 
-                  className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs font-medium text-white"
-                  style={{ backgroundColor: currentUser.color }}
-                  title={`${currentUser.name} (You)`}
-                >
-                  {currentUser.name.charAt(0)}
-                </div>
-                {/* Other collaborators */}
-                {Array.from(collaborators.values()).map(collaborator => (
-                  <div 
-                    key={collaborator.id}
-                    className="w-8 h-8 rounded-full border-2 border-white flex items-center justify-center text-xs font-medium text-white"
-                    style={{ backgroundColor: collaborator.color }}
-                    title={collaborator.name}
-                  >
-                    {collaborator.name.charAt(0)}
-                  </div>
-                ))}
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: collaborator.color }}
+                />
+                <span className="text-sm text-gray-700">{collaborator.name}</span>
+                {collaborator.isDrawing && (
+                  <span className="text-xs text-blue-600">✏️</span>
+                )}
               </div>
-            </div>
+            ))}
+            
+            {Array.from(collaborators.values()).length === 0 && (
+              <p className="text-sm text-gray-500">No other collaborators</p>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Canvas Area */}
-      <div className="relative flex-1">
+      {/* Drawing Toolbar */}
+      <div className="absolute top-4 right-4 z-20">
+        <div className="bg-white rounded-lg shadow-lg p-4 space-y-4">
+          {/* Tools */}
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setTool('brush')}
+              className={`px-3 py-2 rounded ${
+                settings.tool === 'brush'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-100 hover:bg-gray-200'
+              }`}
+              title="Brush Tool"
+            >
+              🖌️
+            </button>
+            <button
+              onClick={() => setTool('eraser')}
+              className={`px-3 py-2 rounded ${
+                settings.tool === 'eraser'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-gray-100 hover:bg-gray-200'
+              }`}
+              title="Eraser Tool"
+            >
+              🧽
+            </button>
+          </div>
+          
+          {/* Brush Size */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-600">Size:</span>
+            <input
+              type="range"
+              min="1"
+              max="50"
+              value={settings.brushSize}
+              onChange={(e) => setBrushSize(Number(e.target.value))}
+              className="flex-1"
+            />
+            <span className="text-sm text-gray-600 w-8">{settings.brushSize}</span>
+          </div>
+          
+          {/* Color Picker */}
+          <div className="flex items-center space-x-2">
+            <span className="text-sm text-gray-600">Color:</span>
+            <input
+              type="color"
+              value={settings.brushColor}
+              onChange={(e) => setBrushColor(e.target.value)}
+              className="w-8 h-8 rounded border border-gray-300"
+            />
+          </div>
+          
+          {/* Actions */}
+          <div className="flex space-x-2">
+            <button
+              onClick={handleUndoLastStroke}
+              className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200"
+              title="Undo Last Stroke"
+            >
+              ↩️
+            </button>
+            <button
+              onClick={handleClearCanvas}
+              className="px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
+              title="Clear Canvas"
+            >
+              🗑️
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Canvas */}
+      <div className="relative w-full h-screen">
         <canvas
           ref={canvasRef}
-          className="w-full h-full cursor-crosshair"
           width={settings.canvasWidth}
           height={settings.canvasHeight}
+          className="absolute inset-0 w-full h-full cursor-crosshair bg-white"
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseLeave}
-          style={{ minHeight: 'calc(100vh - 80px)' }}
         />
-        
-        {/* Drawing Toolbar */}
-        <div className="absolute top-4 left-4 bg-white rounded-lg shadow-lg p-4 z-20">
-          <div className="flex items-center space-x-4">
-            {/* Tools */}
-            <div className="flex space-x-2">
-              <button
-                onClick={() => setTool('brush')}
-                className={`px-3 py-2 rounded ${settings.tool === 'brush' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}
-                title="Brush"
-              >
-                🖌️
-              </button>
-              <button
-                onClick={() => setTool('eraser')}
-                className={`px-3 py-2 rounded ${settings.tool === 'eraser' ? 'bg-blue-500 text-white' : 'bg-gray-100'}`}
-                title="Eraser"
-              >
-                🧹
-              </button>
-            </div>
-            
-            {/* Brush Size */}
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">Size:</span>
-              <input
-                type="range"
-                min="1"
-                max="50"
-                value={settings.brushSize}
-                onChange={(e) => setBrushSize(Number(e.target.value))}
-                className="w-20"
-              />
-              <span className="text-sm text-gray-600 w-6">{settings.brushSize}</span>
-            </div>
-            
-            {/* Color */}
-            <div className="flex items-center space-x-2">
-              <span className="text-sm text-gray-600">Color:</span>
-              <input
-                type="color"
-                value={settings.brushColor}
-                onChange={(e) => setBrushColor(e.target.value)}
-                className="w-8 h-8 rounded border border-gray-300"
-              />
-            </div>
-            
-            {/* Actions */}
-            <div className="flex space-x-2">
-              <button
-                onClick={undoLastStroke}
-                className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200"
-                title="Undo Last Stroke"
-              >
-                ↩️
-              </button>
-              <button
-                onClick={clearCanvas}
-                className="px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
-                title="Clear Canvas"
-              >
-                🗑️
-              </button>
-            </div>
-          </div>
-        </div>
         
         {/* Collaborator cursors */}
         {Array.from(collaborators.values()).map(collaborator => (
@@ -494,7 +452,7 @@ export default function Canvas() {
       {import.meta.env.DEV && (
         <div className="fixed bottom-4 right-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs">
           <div>Room: {canvasId}</div>
-          <div>Status: {isConnected ? '🟢 Connected' : '🔴 Offline Mode'}</div>
+          <div>Status: {isConnected ? '🟢 Supabase Connected' : '🔴 Offline Mode'}</div>
           <div>Collaborators: {Array.from(collaborators.values()).length}</div>
           <div className="mt-2 text-gray-300">
             {isConnected ? 'Real-time collaboration active' : 'Local canvas only'}
