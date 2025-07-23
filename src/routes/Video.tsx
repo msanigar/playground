@@ -13,49 +13,34 @@ export default function Video() {
   const [roomUrl, setRoomUrl] = useState<string>('');
 
   const handleNameSubmit = useCallback((name: string) => {
-    console.log('Video.tsx - handleNameSubmit called with:', name);
     setCheckInData({ name });
     setStep('setup');
   }, []);
 
   const handleSetupComplete = useCallback(() => {
-    console.log('Video.tsx - handleSetupComplete called');
     // Use environment variable for room URL
     const envRoomUrl = import.meta.env.VITE_DEFAULT_ROOM_URL;
     
     if (!envRoomUrl) {
-      console.error('❌ VITE_DEFAULT_ROOM_URL not found in environment variables!');
+      console.error('VITE_DEFAULT_ROOM_URL not found in environment variables!');
       alert('Room URL not configured. Please set VITE_DEFAULT_ROOM_URL in your .env file.');
       return;
     }
     
     const roomUrl = envRoomUrl.trim(); // Clean any whitespace/quotes
-    
-    console.log('🔍 Room URL Debug:', {
-      envRoomUrl,
-      finalRoomUrl: roomUrl,
-      roomUrlLength: roomUrl.length,
-      endsWithQuote: roomUrl.endsWith("'"),
-    });
-    
     setRoomUrl(roomUrl);
     setStep('call');
   }, []);
 
   const handleBackToCheckin = useCallback(() => {
-    console.log('Video.tsx - handleBackToCheckin called');
     setStep('checkin');
     setCheckInData(null);
   }, []);
 
   const handleLeave = useCallback(() => {
-    console.log('Video.tsx - handleLeave called');
     setStep('checkin');
     setCheckInData(null);
   }, []);
-
-  console.log('Video.tsx - roomUrl:', roomUrl);
-  console.log('Video.tsx - checkInData:', checkInData);
 
   // Cleanup media on page unload/navigation (browser-level protection)
   useEffect(() => {

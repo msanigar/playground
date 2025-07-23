@@ -59,7 +59,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Device preferences
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => {
     const preferences = loadDevicePreferences();
-    console.log('🔧 Loaded device preferences:', preferences);
     return preferences;
   });
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
@@ -213,13 +212,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         
         // If another tab used this device recently (within 5 seconds), it's a collision
         if (timeDiff < 5000 && parsed.tabId !== tabId) {
-          console.warn(`🚨 Device collision detected! Another tab is using microphone: ${currentMicDevice}`);
+          console.warn(`Device collision detected - another tab is using microphone: ${currentMicDevice}`);
           setDeviceCollisionDetected(true);
           setShowFeedbackWarning(true);
           
           // Auto-disable microphone in this tab to prevent feedback
           if (!isDirectlyMuted) {
-            console.log(`🚫 Auto-disabling microphone due to device collision`);
             setIsDirectlyMuted(true);
             
             // Stop all audio tracks
@@ -321,8 +319,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             localAnalyserRef.current.maxDecibels = -10;
             source.connect(localAnalyserRef.current);
             
-            console.log(`🎤 Audio monitoring setup: using track ${enabledTracks[0].label || enabledTracks[0].id}`);
-            
             // Check for device collision after setting up monitoring
             checkDeviceCollision();
           } catch (error) {
@@ -330,41 +326,42 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             setLocalAudioLevel(0);
           }
         } else {
-          console.log(`🔇 No enabled audio tracks found - skipping monitoring`);
           setLocalAudioLevel(0);
         }
       } else {
         // Clear local audio level when muted or no stream
         setLocalAudioLevel(0);
       }
-
-      // Monitor remote audio only when Audio Levels panel is open
+      
+      // Setup remote audio monitoring if audio controls are visible
       if (showAudioControls) {
         remoteParticipants.forEach(participant => {
-          if (participant.stream && participant.isAudioEnabled) {
+          if (participant.stream) {
             const audioTracks = participant.stream.getAudioTracks();
             if (audioTracks.length > 0) {
-              const clonedTrack = audioTracks[0].clone();
-              const mediaStream = new MediaStream([clonedTrack]);
-              const source = audioContextRef.current!.createMediaStreamSource(mediaStream);
-              const analyser = audioContextRef.current!.createAnalyser();
-              analyser.fftSize = 256;
-              analyser.smoothingTimeConstant = 0.8;
-              analyser.minDecibels = -90;
-              analyser.maxDecibels = -10;
-              source.connect(analyser);
-              remoteAnalysersRef.current[participant.id] = analyser;
+              try {
+                const source = audioContextRef.current!.createMediaStreamSource(participant.stream);
+                const analyser = audioContextRef.current!.createAnalyser();
+                analyser.fftSize = 256;
+                analyser.smoothingTimeConstant = 0.8;
+                source.connect(analyser);
+                remoteAnalysersRef.current[participant.id] = analyser;
+              } catch (error) {
+                console.warn(`Failed to setup audio monitoring for ${participant.displayName}:`, error);
+              }
             }
           }
         });
       }
-
-      // Start monitoring loop
-      updateAudioLevels();
+      
+      // Start the audio level update loop
+      if (!animationFrameRef.current) {
+        updateAudioLevels();
+      }
     } catch (error) {
       console.error('Failed to setup audio monitoring:', error);
     }
-  }, [actualMicEnabled, remoteParticipants, showAudioControls, localMedia.state.localStream]);
+  }, [actualMicEnabled, localMedia.state.localStream, showAudioControls, remoteParticipants, checkDeviceCollision]);
 
   const updateAudioLevels = useCallback(() => {
     const now = Date.now();
@@ -425,7 +422,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
     // Continue monitoring at 30fps for less CPU usage
     animationFrameRef.current = requestAnimationFrame(updateAudioLevels);
-  }, [showAudioControls]);
+  }, [actualMicEnabled, showAudioControls]);
 
   const cleanupAudioMonitoring = useCallback(() => {
     if (animationFrameRef.current) {
@@ -508,66 +505,35 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       cameraDevices.length === 0 ||
       microphoneDevices.length === 0
     ) {
-      console.log(`⏳ Waiting for device state: connected=${state.connectionStatus === 'connected'}, hasStream=${!!localParticipant?.stream}, camera=${currentCameraDeviceId}, mic=${currentMicrophoneDeviceId}, devices=${cameraDevices.length}/${microphoneDevices.length}`);
       return;
     }
     
-    console.log(`🔧 Device state ready - applying preferences...`);
-    
     // Apply preferences when everything is ready
     const applyDevicePreferences = async () => {
-      let deviceChangeNeeded = false;
-      
       try {
         // Apply camera preference if we have one and it's different from current
         if (cameraDeviceId && setCameraDevice && cameraDeviceId !== currentCameraDeviceId) {
           const cameraExists = cameraDevices.some(d => d.deviceId === cameraDeviceId);
           if (cameraExists) {
-            console.log(`🎥 Applying preferred camera: ${cameraDeviceId}`);
-            console.log(`🎥 Current camera before change: ${currentCameraDeviceId}`);
             await setCameraDevice(cameraDeviceId);
-            deviceChangeNeeded = true;
-            
-            // Verify the change after a delay
-            setTimeout(() => {
-              console.log(`🎥 Current camera after change: ${localMedia.state.currentCameraDeviceId}`);
-            }, 500);
           } else {
-            console.warn(`🎥 Preferred camera not found: ${cameraDeviceId}`);
+            console.warn(`Preferred camera not found: ${cameraDeviceId}`);
           }
-        } else {
-          console.log(`🎥 Skipping camera: saved=${cameraDeviceId}, current=${currentCameraDeviceId}, same=${cameraDeviceId === currentCameraDeviceId}`);
         }
         
         // Apply microphone preference if we have one and it's different from current
         if (microphoneDeviceId && setMicrophoneDevice && microphoneDeviceId !== 'default' && microphoneDeviceId !== currentMicrophoneDeviceId) {
           const micExists = microphoneDevices.some(d => d.deviceId === microphoneDeviceId);
           if (micExists) {
-            console.log(`🎤 Applying preferred microphone: ${microphoneDeviceId}`);
-            console.log(`🎤 Current microphone before change: ${currentMicrophoneDeviceId}`);
             await setMicrophoneDevice(microphoneDeviceId);
-            deviceChangeNeeded = true;
-            
-            // Verify the change after a delay
-            setTimeout(() => {
-              console.log(`🎤 Current microphone after change: ${localMedia.state.currentMicrophoneDeviceId}`);
-            }, 500);
           } else {
-            console.warn(`🎤 Preferred microphone not found: ${microphoneDeviceId}`);
+            console.warn(`Preferred microphone not found: ${microphoneDeviceId}`);
           }
-        } else {
-          console.log(`🎤 Skipping microphone: saved=${microphoneDeviceId}, current=${currentMicrophoneDeviceId}, same=${microphoneDeviceId === currentMicrophoneDeviceId}`);
-        }
-        
-        if (deviceChangeNeeded) {
-          console.log('✅ Device preferences applied successfully');
-        } else {
-          console.log('ℹ️ No device changes needed');
         }
         
         setHasSetInitialDevices(true);
       } catch (error) {
-        console.error('❌ Failed to apply device preferences:', error);
+        console.error('Failed to apply device preferences:', error);
         setHasSetInitialDevices(true);
       }
     };
@@ -590,21 +556,17 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Log successful connection with media info (only once)
   useEffect(() => {
     if (state.connectionStatus === 'connected' && localParticipant && localParticipant.stream) {
-      console.log('✅ Connection successful with media stream');
-      
       // Detect potential multiple tab scenario
       const sameBrowserParticipants = remoteParticipants.filter(p => 
         p.displayName === displayName || p.displayName === localParticipant.displayName
       );
       
       if (sameBrowserParticipants.length > 0) {
-        console.warn('⚠️ Multiple tabs detected with same user name - this may cause audio feedback!');
-        console.warn('💡 Tip: This tab will disable microphone publishing to prevent feedback');
+        console.warn('Multiple tabs detected - disabling microphone to prevent feedback');
         setShowFeedbackWarning(true);
         
         // Instead of just muting tracks, completely disable microphone at the Whereby level
         if (!isDirectlyMuted) {
-          console.log('🚫 Auto-disabling microphone publishing due to multiple tabs');
           setIsDirectlyMuted(true);
           
           // Stop all audio tracks AND disable Whereby's audio publishing
@@ -631,8 +593,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             // Force cleanup of audio monitoring
             cleanupAudioMonitoring();
             setLocalAudioLevel(0);
-            
-            console.log('🚫 Microphone publishing completely disabled for this tab');
           } catch (error) {
             console.error('Error disabling microphone publishing:', error);
           }
@@ -643,7 +603,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       } else {
         // No duplicates detected, re-enable microphone if it was auto-disabled
         if (isDirectlyMuted && sameBrowserParticipants.length === 0) {
-          console.log('🔊 Re-enabling microphone publishing - no duplicates detected');
           setIsDirectlyMuted(false);
           
           // Re-enable Whereby's audio publishing
@@ -656,8 +615,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             setTimeout(() => {
               setupAudioMonitoring();
             }, 500);
-            
-            console.log('🎤 Microphone publishing re-enabled');
           } catch (error) {
             console.error('Error re-enabling microphone publishing:', error);
           }
@@ -738,8 +695,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
     return () => {
-      console.log('🧹 VideoCall cleanup initiated');
-      
       // Cleanup audio monitoring
       cleanupAudioMonitoring();
       
@@ -772,8 +727,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
   // Enhanced leave handler with cleanup
   const handleLeaveWithCleanup = useCallback(() => {
-    console.log('🚪 Leaving call...');
-    
     // Stop all media tracks immediately
     if (localParticipant?.stream) {
       localParticipant.stream.getTracks().forEach(track => track.stop());
@@ -796,39 +749,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     setTimeout(() => {
       onLeave();
     }, 100);
-  }, [onLeave]); // Simplified dependencies
-
-  // Enhanced debugging function for WebRTC state
-  const logWebRTCState = useCallback((context: string) => {
-    console.log(`🔬 [${context}] WebRTC State Analysis:`);
-    
-    // Track state in localParticipant stream
-    if (localParticipant?.stream) {
-      const audioTracks = localParticipant.stream.getAudioTracks();
-      console.log(`  📡 localParticipant.stream:`);
-      audioTracks.forEach((track, i) => {
-        console.log(`    🎵 Track ${i}: ${track.label} | enabled=${track.enabled} | readyState=${track.readyState} | muted=${track.muted}`);
-      });
-    }
-    
-    // Track state in localMedia stream  
-    if (localMedia.state.localStream) {
-      const audioTracks = localMedia.state.localStream.getAudioTracks();
-      console.log(`  📱 localMedia.localStream:`);
-      audioTracks.forEach((track, i) => {
-        console.log(`    🎵 Track ${i}: ${track.label} | enabled=${track.enabled} | readyState=${track.readyState} | muted=${track.muted}`);
-      });
-    }
-    
-    // Whereby's internal state
-    console.log(`  🏢 Whereby State: isAudioEnabled=${localParticipant?.isAudioEnabled}, actualMicEnabled=${actualMicEnabled}, isDirectlyMuted=${isDirectlyMuted}`);
-    
-    // Browser tab info
-    console.log(`  🌐 Browser: isIncognito=${window.navigator.webdriver}, tabHidden=${document.hidden}`);
-    
-    // Device collision state
-    console.log(`  🚨 Collision: deviceCollisionDetected=${deviceCollisionDetected}, showFeedbackWarning=${showFeedbackWarning}`);
-  }, [localParticipant, localMedia.state.localStream, actualMicEnabled, isDirectlyMuted, deviceCollisionDetected, showFeedbackWarning]);
+  }, [onLeave]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center p-4">
@@ -1057,111 +978,62 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 onClick={async () => {
                   try {
                     const wasEnabled = actualMicEnabled;
-                    console.log(`🎤 Direct mute control: ${wasEnabled ? 'muting' : 'unmuting'}`);
-                    
-                    // DEBUG: Log state before any changes
-                    logWebRTCState('BEFORE_MUTE_CHANGE');
                     
                     if (wasEnabled) {
                       // MUTING - Pure track control approach (no Whereby toggle)
-                      console.log(`🔇 Pure track muting - bypassing Whereby API completely`);
-                      
-                      // 1. Stop audio monitoring immediately
                       cleanupAudioMonitoring();
                       setLocalAudioLevel(0);
                       
-                      // 2. Only disable tracks (don't stop them to preserve for unmuting)
-                      let mutedTrackCount = 0;
-                      
+                      // Only disable tracks (don't stop them to preserve for unmuting)
                       if (localParticipant?.stream) {
-                        const audioTracks = localParticipant.stream.getAudioTracks();
-                        audioTracks.forEach((track, index) => {
-                          track.enabled = false; // Only disable, don't stop
-                          mutedTrackCount++;
-                          console.log(`🔇 DISABLED localParticipant track ${index}: ${track.label || track.id}`);
+                        localParticipant.stream.getAudioTracks().forEach((track) => {
+                          track.enabled = false;
                         });
                       }
                       
                       if (localMedia.state.localStream) {
-                        const audioTracks = localMedia.state.localStream.getAudioTracks();
-                        audioTracks.forEach((track, index) => {
-                          track.enabled = false; // Only disable, don't stop
-                          mutedTrackCount++;
-                          console.log(`🔇 DISABLED localMedia track ${index}: ${track.label || track.id}`);
+                        localMedia.state.localStream.getAudioTracks().forEach((track) => {
+                          track.enabled = false;
                         });
                       }
                       
-                      console.log(`✅ Pure track mute completed - ${mutedTrackCount} tracks disabled`);
-                      console.log(`✅ Audio level forced to: 0%`);
-                      console.log(`ℹ️ Skipping Whereby toggle - using pure track control`);
-                      
-                      // Update our direct mute state
                       setIsDirectlyMuted(true);
-                      
-                      // DEBUG: Log state after muting
-                      setTimeout(() => logWebRTCState('AFTER_MUTE'), 100);
                       
                     } else {
                       // UNMUTING - Pure track control approach (no Whereby toggle)
-                      console.log(`🔊 Pure track unmuting - just re-enabling tracks`);
-                      
                       try {
                         // Simply re-enable all audio tracks
-                        let unmutedTrackCount = 0;
-                        
                         if (localParticipant?.stream) {
-                          const audioTracks = localParticipant.stream.getAudioTracks();
-                          audioTracks.forEach((track, index) => {
+                          localParticipant.stream.getAudioTracks().forEach((track) => {
                             if (track.readyState === 'live') {
                               track.enabled = true;
-                              unmutedTrackCount++;
-                              console.log(`🔊 ENABLED localParticipant track ${index}: ${track.label || track.id}`);
-                            } else {
-                              console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
                             }
                           });
                         }
                         
                         if (localMedia.state.localStream) {
-                          const audioTracks = localMedia.state.localStream.getAudioTracks();
-                          audioTracks.forEach((track, index) => {
+                          localMedia.state.localStream.getAudioTracks().forEach((track) => {
                             if (track.readyState === 'live') {
                               track.enabled = true;
-                              unmutedTrackCount++;
-                              console.log(`🔊 ENABLED localMedia track ${index}: ${track.label || track.id}`);
-                            } else {
-                              console.warn(`⚠️ Cannot enable dead track ${index}: ${track.readyState}`);
                             }
                           });
                         }
                         
-                        console.log(`✅ Pure track unmute completed - ${unmutedTrackCount} tracks enabled`);
-                        console.log(`ℹ️ Skipping Whereby toggle - using pure track control`);
-                        
-                        // Update our direct mute state
                         setIsDirectlyMuted(false);
-                        
-                        // DEBUG: Log state after unmuting
-                        setTimeout(() => logWebRTCState('AFTER_UNMUTE'), 100);
                         
                         // Restart audio monitoring after a brief delay
                         setTimeout(() => {
-                          if (unmutedTrackCount > 0) {
-                            setupAudioMonitoring();
-                            console.log(`✅ Audio monitoring restarted with ${unmutedTrackCount} tracks`);
-                          } else {
-                            console.warn(`⚠️ No tracks available for monitoring`);
-                          }
+                          setupAudioMonitoring();
                         }, 200);
                         
                       } catch (error) {
-                        console.error(`❌ Error during pure track unmuting:`, error);
+                        console.error('Error during unmuting:', error);
                         setIsDirectlyMuted(false); // Reset state even if error
                       }
                     }
                   
                   } catch (error) {
-                    console.error('❌ Error in direct mute control:', error);
+                    console.error('Error in mute control:', error);
                   }
                 }}
                 className={`p-4 rounded-full transition-all duration-200 relative ${
