@@ -93,13 +93,42 @@ export default function Canvas() {
         // Load canvas data first
         await loadCanvas(canvasId);
         
-        // Connect to PartyKit
+        // Check if we're in production/deployed environment
+        const isProduction = import.meta.env.PROD || window.location.hostname !== 'localhost';
+        
+        if (isProduction) {
+          console.log('🎨 Canvas running in offline mode (no real-time collaboration server configured)');
+          setConnected(false);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Connect to PartyKit only in development
         const socket = new PartySocket({
           host: "localhost:1999", // Development server
           room: canvasId,
         });
         
+        let connectionTimeout: number | null = null;
+        let hasConnected = false;
+        
+        // Set a connection timeout
+        connectionTimeout = setTimeout(() => {
+          if (!hasConnected) {
+            console.log('🎨 Canvas collaboration server not available, running in offline mode');
+            socket.close();
+            setConnected(false);
+            setIsLoading(false);
+          }
+        }, 3000); // 3 second timeout
+        
         socket.onopen = () => {
+          hasConnected = true;
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            connectionTimeout = null;
+          }
+          
           console.log(`🎨 Connected to Canvas room: ${canvasId}`);
           setConnected(true);
           
@@ -116,7 +145,7 @@ export default function Canvas() {
           
           socket.send(JSON.stringify(joinOperation));
         };
-        
+
         socket.onmessage = (event) => {
           try {
             const operation: CanvasOperation = JSON.parse(event.data);
@@ -154,13 +183,24 @@ export default function Canvas() {
         };
         
         socket.onclose = () => {
-          console.log('🔌 Disconnected from Canvas room');
+          if (hasConnected) {
+            console.log('🔌 Disconnected from Canvas room');
+          }
           setConnected(false);
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+          }
         };
         
         socket.onerror = (error) => {
-          console.error('❌ Canvas WebSocket error:', error);
+          if (hasConnected) {
+            console.error('❌ Canvas WebSocket error:', error);
+          }
           setConnected(false);
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            setIsLoading(false);
+          }
         };
         
         partySocketRef.current = socket;
@@ -168,6 +208,7 @@ export default function Canvas() {
         
       } catch (error) {
         console.error('❌ Failed to connect to Canvas collaboration:', error);
+        setConnected(false);
         setIsLoading(false);
       }
     };
@@ -194,14 +235,19 @@ export default function Canvas() {
   const broadcastOperation = useCallback((operation: CanvasOperation) => {
     const socket = partySocketRef.current;
     if (!socket || socket.readyState !== socket.OPEN) {
-      console.warn('🔌 Socket not ready, operation will be local only');
+      // Only log in development mode to avoid spam
+      if (import.meta.env.DEV && socket) {
+        console.warn('🔌 Socket not ready, operation will be local only');
+      }
       return;
     }
     
     try {
       socket.send(JSON.stringify(operation));
     } catch (error) {
-      console.error('❌ Failed to send Canvas operation:', error);
+      if (import.meta.env.DEV) {
+        console.error('❌ Failed to send Canvas operation:', error);
+      }
     }
   }, []);
 
@@ -448,9 +494,12 @@ export default function Canvas() {
       {import.meta.env.DEV && (
         <div className="fixed bottom-4 right-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs">
           <div>Room: {canvasId}</div>
-          <div>Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}</div>
+          <div>Status: {isConnected ? '🟢 Connected' : '🔴 Offline Mode'}</div>
           <div>Collaborators: {Array.from(collaborators.values()).length}</div>
           <div className="mt-2 text-gray-300">
+            {isConnected ? 'Real-time collaboration active' : 'Local canvas only'}
+          </div>
+          <div className="text-gray-300">
             Add ?room=your-room-name to URL to change rooms
           </div>
         </div>
