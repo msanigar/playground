@@ -157,10 +157,12 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
 
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
+      console.warn('Geolocation not supported');
       resolve(null);
       return;
     }
     
+    console.log('🌍 Requesting location permission...');
     navigator.geolocation.getCurrentPosition(
       async ({ coords }) => {
         try {
@@ -249,7 +251,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
         }
       },
       (error) => {
-        console.warn('Geolocation failed:', error);
+        console.warn('🌍 Geolocation failed:', error.message || error);
         resolve(null);
       },
       {
