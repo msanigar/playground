@@ -1,0 +1,5 @@
+{
+  "name": "canvas-collaboration-server",
+  "main": "server.ts",
+  "type": "module"
+} 

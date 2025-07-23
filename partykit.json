@@ -1,0 +1,7 @@
+{
+  "name": "canvas-collaboration",
+  "main": "party/server.ts",
+  "serve": {
+    "path": "dist/*"
+  }
+} 
