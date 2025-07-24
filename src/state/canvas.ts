@@ -91,7 +91,7 @@ export async function loadCanvasData(canvasId: string): Promise<{ strokes: Drawi
     strokes: strokes.filter((s: DrawingStroke) => s.completed), // Only completed strokes
     collaborators: [], // Will be populated by real-time connection
   };
-}
+  }
 
 type CanvasStore = {
   // Canvas state
@@ -504,7 +504,56 @@ export const useCanvasStore = create<CanvasStore>()(
       saveCanvas: () => {
         const { strokes, roomId } = get();
         const completedStrokes = strokes.filter(s => s.completed);
-        localStorage.setItem(`canvas-${roomId}`, JSON.stringify(completedStrokes));
+        
+        try {
+          // Clean up old canvas data first (defined below)
+          try {
+            const keys = Object.keys(localStorage);
+            const canvasKeys = keys.filter(key => key.startsWith('canvas-'));
+            
+            // If we have more than 5 canvas rooms, remove the oldest ones
+            if (canvasKeys.length > 5) {
+              const keysToRemove = canvasKeys.slice(0, canvasKeys.length - 3);
+              keysToRemove.forEach(key => {
+                try {
+                  localStorage.removeItem(key);
+                } catch {
+                  // Ignore cleanup errors
+                }
+              });
+            }
+          } catch {
+            // Ignore cleanup errors
+          }
+          
+          // Limit localStorage to last 100 strokes to prevent quota issues
+          const recentStrokes = completedStrokes.slice(-100);
+          const dataToSave = JSON.stringify(recentStrokes);
+          
+          // Check if data size is reasonable (under 4MB)
+          if (dataToSave.length > 4 * 1024 * 1024) {
+            console.warn('Canvas data too large for localStorage, keeping only last 50 strokes');
+            const evenMoreRecentStrokes = completedStrokes.slice(-50);
+            localStorage.setItem(`canvas-${roomId}`, JSON.stringify(evenMoreRecentStrokes));
+          } else {
+            localStorage.setItem(`canvas-${roomId}`, dataToSave);
+          }
+        } catch (error) {
+          // Handle quota exceeded gracefully
+          if (error instanceof Error && error.name === 'QuotaExceededError') {
+            console.warn('localStorage quota exceeded, clearing old canvas data');
+            try {
+              // Clear old canvas data and try with minimal strokes
+              localStorage.removeItem(`canvas-${roomId}`);
+              const minimalStrokes = completedStrokes.slice(-20);
+              localStorage.setItem(`canvas-${roomId}`, JSON.stringify(minimalStrokes));
+            } catch {
+              console.warn('Cannot save to localStorage, continuing without local backup');
+            }
+          } else {
+            console.error('Failed to save canvas:', error);
+          }
+        }
       },
     }),
     {
