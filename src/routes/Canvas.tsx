@@ -216,6 +216,35 @@ export default function Canvas() {
     return unsubscribe;
   }, [currentUser.id, isConnected]);
 
+  // Cleanup stale collaborators periodically
+  useEffect(() => {
+    const cleanup = setInterval(() => {
+      const now = Date.now();
+      const staleThreshold = 30000; // 30 seconds
+      
+      Array.from(collaborators.entries()).forEach(([userId, collaborator]) => {
+        if (now - collaborator.lastSeen > staleThreshold) {
+          console.log(`🧹 Removing stale collaborator: ${collaborator.name}`);
+          removeCollaborator(userId);
+        }
+      });
+    }, 10000); // Check every 10 seconds
+    
+    return () => clearInterval(cleanup);
+  }, [collaborators, removeCollaborator]);
+
+  // Clean up cursor when tab/window is closed
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (canvasServiceRef.current) {
+        canvasServiceRef.current.removeCursor();
+      }
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   // Canvas mouse/touch event handlers
   const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
