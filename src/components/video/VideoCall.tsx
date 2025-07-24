@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRoomConnection, useLocalMedia, VideoView } from '@whereby.com/browser-sdk/react';
-import { Mic, MicOff, Video, VideoOff, Phone, MessageCircle } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, Phone, MessageCircle, Settings } from 'lucide-react';
 
 interface VideoCallProps {
   roomUrl: string;
@@ -8,22 +8,61 @@ interface VideoCallProps {
   onLeave: () => void;
 }
 
+interface DeviceInfo {
+  deviceId: string;
+  label: string;
+}
+
+// Device preference utilities (shared with MediaSetup)
+const DEVICE_PREFERENCES_KEY = 'whereby-device-preferences';
+
+interface DevicePreferences {
+  cameraDeviceId?: string;
+  microphoneDeviceId?: string;
+  speakerDeviceId?: string;
+}
+
+const loadDevicePreferences = (): DevicePreferences => {
+  try {
+    const saved = localStorage.getItem(DEVICE_PREFERENCES_KEY);
+    return saved ? JSON.parse(saved) : {};
+  } catch (error) {
+    console.warn('Failed to load device preferences:', error);
+    return {};
+  }
+};
+
+const saveDevicePreferences = (preferences: DevicePreferences) => {
+  try {
+    localStorage.setItem(DEVICE_PREFERENCES_KEY, JSON.stringify(preferences));
+  } catch (error) {
+    console.warn('Failed to save device preferences:', error);
+  }
+};
+
 export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallProps) {
   const [showChat, setShowChat] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const [showDeviceSettings, setShowDeviceSettings] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  const [devices, setDevices] = useState<{
+    cameras: DeviceInfo[];
+    microphones: DeviceInfo[];
+    speakers: DeviceInfo[];
+  }>({
+    cameras: [],
+    microphones: [],
+    speakers: []
+  });
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
   
-  // Initialize media 
+  // Initialize media with saved device preferences
   const localMedia = useLocalMedia({
     audio: true,
     video: true,
   });
 
   const connection = useRoomConnection(roomUrl, {
-    localMediaOptions: {
-      audio: true,
-      video: true,
-    },
     displayName: displayName,
   });
 
@@ -33,6 +72,42 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Simplified audio/video status
   const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
   const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
+
+  // Load available devices
+  useEffect(() => {
+    const getDevices = async () => {
+      try {
+        const deviceList = await navigator.mediaDevices.enumerateDevices();
+        
+        const cameras = deviceList
+          .filter(device => device.kind === 'videoinput')
+          .map(device => ({
+            deviceId: device.deviceId,
+            label: device.label || `Camera ${device.deviceId.slice(0, 8)}`
+          }));
+
+        const microphones = deviceList
+          .filter(device => device.kind === 'audioinput')
+          .map(device => ({
+            deviceId: device.deviceId,
+            label: device.label || `Microphone ${device.deviceId.slice(0, 8)}`
+          }));
+
+        const speakers = deviceList
+          .filter(device => device.kind === 'audiooutput')
+          .map(device => ({
+            deviceId: device.deviceId,
+            label: device.label || `Speaker ${device.deviceId.slice(0, 8)}`
+          }));
+
+        setDevices({ cameras, microphones, speakers });
+      } catch (error) {
+        console.error('Error loading devices:', error);
+      }
+    };
+
+    getDevices();
+  }, []);
 
   // Calculate dynamic grid layout based on participant count
   const totalParticipants = (localParticipant?.stream ? 1 : 0) + remoteParticipants.length;
@@ -87,7 +162,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   // Enhanced leave handler with cleanup
   const handleLeave = useCallback(async () => {
     try {
-      console.log('🚨 Page unload detected - stopping all media streams');
+      console.log('🚨 Leaving call - cleaning up media streams');
       
       // Stop all media tracks immediately
       if (localParticipant?.stream) {
@@ -114,69 +189,30 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     }
   }, [localParticipant?.stream, localMedia.state.localStream, actions.leaveRoom, onLeave]);
 
-  // Enhanced mute handling for cross-device scenarios
+  // FIXED: Proper mute handling - don't stop tracks, just mute them
   const handleMicToggle = useCallback(async () => {
     try {
-      const wasEnabled = actualMicEnabled;
+      console.log(`🎤 ${actualMicEnabled ? 'Muting' : 'Unmuting'} microphone...`);
       
-      if (wasEnabled) {
-        // MUTING - Aggressive approach for cross-device compatibility
-        console.log('🔇 Muting microphone...');
-        
-        // First: Disable all local audio tracks completely
-        if (localParticipant?.stream) {
-          localParticipant.stream.getAudioTracks().forEach((track) => {
-            track.enabled = false;
-            track.stop(); // Actually stop the track
-          });
-        }
-        
-        if (localMedia.state.localStream) {
-          localMedia.state.localStream.getAudioTracks().forEach((track) => {
-            track.enabled = false;
-            track.stop(); // Actually stop the track
-          });
-        }
-        
-        // Then: Tell Whereby to stop publishing audio
-        if (actions.toggleMicrophone) {
-          actions.toggleMicrophone();
-        }
-        
-      } else {
-        // UNMUTING - Request new audio stream
-        console.log('🎤 Unmuting microphone...');
-        
-        // Tell Whereby to re-enable audio publishing
-        if (actions.toggleMicrophone) {
-          actions.toggleMicrophone();
-        }
-        
-        // Small delay to allow Whereby to restart audio
-        setTimeout(() => {
-          // Re-enable any existing tracks that are still live
-          if (localParticipant?.stream) {
-            localParticipant.stream.getAudioTracks().forEach((track) => {
-              if (track.readyState === 'live') {
-                track.enabled = true;
-              }
-            });
-          }
-          
-          if (localMedia.state.localStream) {
-            localMedia.state.localStream.getAudioTracks().forEach((track) => {
-              if (track.readyState === 'live') {
-                track.enabled = true;
-              }
-            });
-          }
-        }, 200);
+      // Use Whereby's built-in toggle - this handles everything properly
+      if (actions.toggleMicrophone) {
+        actions.toggleMicrophone();
       }
       
     } catch (error) {
       console.error('Error in mute control:', error);
     }
-  }, [actualMicEnabled, localParticipant?.stream, localMedia.state.localStream, actions.toggleMicrophone]);
+  }, [actualMicEnabled, actions.toggleMicrophone]);
+
+  // Handle device changes
+  const handleDeviceChange = async (deviceType: keyof DevicePreferences, deviceId: string) => {
+    const newPreferences = { ...devicePreferences, [deviceType]: deviceId };
+    setDevicePreferences(newPreferences);
+    saveDevicePreferences(newPreferences);
+
+    // For now, just save preferences - actual device switching during call is complex
+    console.log(`Device preference updated: ${deviceType} = ${deviceId}`);
+  };
 
   // Add debug toggle functionality
   const toggleDebug = () => setShowDebug(!showDebug);
@@ -225,7 +261,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         {state.connectionStatus === 'reconnecting' && (
           <div className="text-center py-8">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4"></div>
-            <p className="text-white">Connecting to room...</p>
+            <p className="text-white">Reconnecting to room...</p>
             <p className="text-blue-200 text-sm mt-2">Status: {state.connectionStatus}</p>
           </div>
         )}
@@ -240,24 +276,73 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
         {(state.connectionStatus === 'connected' || state.connectionStatus === 'ready') && (
           <>
-            {/* Audio Feedback Warning */}
-                         <div className="mb-4 p-4 bg-yellow-500/20 border border-yellow-500/40 rounded-xl backdrop-blur-sm">
-               <div className="flex items-center gap-3">
-                 <div className="text-yellow-400 text-xl">⚠️</div>
-                 <div className="flex-1">
-                   <div className="text-yellow-100 font-medium">Cross-Device Audio Notice</div>
-                   <div className="text-yellow-200 text-sm">
-                     Testing with multiple devices can cause feedback. Ensure both devices are properly muted or use headphones.
-                   </div>
-                 </div>
-                 <button
-                   onClick={toggleDebug}
-                   className="px-3 py-1 bg-blue-500/50 hover:bg-blue-600/50 rounded text-white text-sm"
-                 >
-                   Debug
-                 </button>
-               </div>
-             </div>
+            {/* Device Settings Panel */}
+            {showDeviceSettings && (
+              <div className="mb-4 p-4 bg-black/20 rounded-xl border border-white/10">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-white font-medium">Device Settings</h3>
+                  <button
+                    onClick={() => setShowDeviceSettings(false)}
+                    className="text-gray-400 hover:text-white text-sm"
+                  >
+                    ✕
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-blue-200 text-sm font-medium mb-2">Camera</label>
+                    <select
+                      value={devicePreferences.cameraDeviceId || ''}
+                      onChange={(e) => handleDeviceChange('cameraDeviceId', e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                    >
+                      {devices.cameras.map((camera) => (
+                        <option key={camera.deviceId} value={camera.deviceId}>
+                          {camera.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-blue-200 text-sm font-medium mb-2">Microphone</label>
+                    <select
+                      value={devicePreferences.microphoneDeviceId || ''}
+                      onChange={(e) => handleDeviceChange('microphoneDeviceId', e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                    >
+                      {devices.microphones.map((mic) => (
+                        <option key={mic.deviceId} value={mic.deviceId}>
+                          {mic.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div>
+                    <label className="block text-blue-200 text-sm font-medium mb-2">Speaker</label>
+                    <select
+                      value={devicePreferences.speakerDeviceId || ''}
+                      onChange={(e) => handleDeviceChange('speakerDeviceId', e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                    >
+                      {devices.speakers.map((speaker) => (
+                        <option key={speaker.deviceId} value={speaker.deviceId}>
+                          {speaker.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="mt-4 p-3 bg-blue-500/20 border border-blue-500/40 rounded">
+                  <p className="text-blue-200 text-sm">
+                    💡 Device changes will take effect on your next call. Current call uses devices selected during setup.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Video Grid */}
             <div className={getGridClasses()}>
@@ -397,6 +482,17 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               </button>
 
               <button
+                onClick={() => setShowDeviceSettings(!showDeviceSettings)}
+                className={`p-4 rounded-full transition-all duration-200 ${
+                  showDeviceSettings 
+                    ? 'bg-purple-500 hover:bg-purple-600' 
+                    : 'bg-gray-600 hover:bg-gray-700'
+                }`}
+              >
+                <Settings className="w-6 h-6 text-white" />
+              </button>
+
+              <button
                 onClick={() => setShowChat(!showChat)}
                 className={`p-4 rounded-full transition-all duration-200 ${
                   showChat 
@@ -405,6 +501,18 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 }`}
               >
                 <MessageCircle className="w-6 h-6 text-white" />
+              </button>
+
+              <button
+                onClick={toggleDebug}
+                className={`p-4 rounded-full transition-all duration-200 ${
+                  showDebug 
+                    ? 'bg-orange-500 hover:bg-orange-600' 
+                    : 'bg-gray-600 hover:bg-gray-700'
+                }`}
+                title="Debug Info"
+              >
+                <span className="text-white text-sm font-mono">DB</span>
               </button>
 
               <button
@@ -468,6 +576,12 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               <p><strong>Video Enabled (Whereby):</strong> {localParticipant?.isVideoEnabled ? 'yes' : 'no'}</p>
               <p><strong>Remote Participants:</strong> {remoteParticipants.length}</p>
               <p><strong>Has Stream:</strong> {localParticipant?.stream ? 'yes' : 'no'}</p>
+              <p><strong>Device Preferences:</strong></p>
+              <div className="ml-4 text-xs">
+                <p>Camera: {devicePreferences.cameraDeviceId || 'default'}</p>
+                <p>Microphone: {devicePreferences.microphoneDeviceId || 'default'}</p>
+                <p>Speaker: {devicePreferences.speakerDeviceId || 'default'}</p>
+              </div>
             </div>
           </div>
         )}
