@@ -40,93 +40,16 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const [showDebug, setShowDebug] = useState(false);
   const [chatInput, setChatInput] = useState('');
   
-
-  
-  // Audio monitoring state
-  const [localAudioLevel, setLocalAudioLevel] = useState(0);
-  const [remoteAudioLevels, setRemoteAudioLevels] = useState<{[participantId: string]: number}>({});
+  // Simplified state - removed complex audio monitoring
   const [showAudioControls, setShowAudioControls] = useState(false);
-  
-  // Audio monitoring refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const localAnalyserRef = useRef<AnalyserNode | null>(null);
-  const remoteAnalysersRef = useRef<{[participantId: string]: AnalyserNode}>({});
-  const animationFrameRef = useRef<number | null>(null);
-  const lastUpdateTimeRef = useRef<number>(0);
-  const lastLocalLevelRef = useRef<number>(0);
-  const lastRemoteLevelsRef = useRef<{[participantId: string]: number}>({});
-  
-  // Device preferences
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => {
     const preferences = loadDevicePreferences();
     return preferences;
   });
   const [speakerDevices, setSpeakerDevices] = useState<{deviceId: string, label: string}[]>([]);
   const [hasSetInitialDevices, setHasSetInitialDevices] = useState(false);
-  const [showFeedbackWarning, setShowFeedbackWarning] = useState(false);
-  const [isDirectlyMuted, setIsDirectlyMuted] = useState(false);
-  const [deviceCollisionDetected, setDeviceCollisionDetected] = useState(false);
   
-  // Stable tab ID for collision detection
-  const tabIdRef = useRef<string>(`tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
-
-  const handleSendMessage = () => {
-    if (chatInput.trim()) {
-      try {
-        // Use Whereby's built-in chat system
-        if (actions.sendChatMessage) {
-          actions.sendChatMessage(chatInput.trim());
-        } else {
-          console.warn('sendChatMessage action not available');
-        }
-        setChatInput('');
-      } catch (error) {
-        console.error('Failed to send chat message:', error);
-      }
-    }
-  };
-  
-  // Save device preference and update state
-  const handleDeviceChange = (deviceType: keyof DevicePreferences, deviceId: string) => {
-    const newPreferences = { ...devicePreferences, [deviceType]: deviceId };
-    setDevicePreferences(newPreferences);
-    saveDevicePreferences(newPreferences);
-  };
-
-  // Helper function to check actual stream track states
-  const getActualAudioVideoState = () => {
-    const stream = localParticipant?.stream;
-    if (!stream) return { hasAudio: false, hasVideo: false, audioEnabled: false, videoEnabled: false };
-    
-    const audioTracks = stream.getAudioTracks();
-    const videoTracks = stream.getVideoTracks();
-    
-    return {
-      hasAudio: audioTracks.length > 0,
-      hasVideo: videoTracks.length > 0,
-      audioEnabled: audioTracks.length > 0 && audioTracks[0].enabled,
-      videoEnabled: videoTracks.length > 0 && videoTracks[0].enabled,
-    };
-  };
-
-  // Helper function to get participant display name by ID
-  const getParticipantDisplayName = (participantId: string) => {
-    // Check if it's the local participant
-    if (localParticipant?.id === participantId) {
-      return localParticipant.displayName || displayName || 'You';
-    }
-    
-    // Check remote participants
-    const remoteParticipant = remoteParticipants.find(p => p.id === participantId);
-    if (remoteParticipant) {
-      return remoteParticipant.displayName || 'Unknown';
-    }
-    
-    // Fallback to the ID if no match found
-    return participantId;
-  };
-
-  // Initialize media - we'll apply preferences immediately after initialization  
+  // Initialize media - simplified to avoid stream conflicts
   const localMedia = useLocalMedia({
     audio: true,
     video: true,
@@ -143,8 +66,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   const { state, actions } = connection;
   const { localParticipant, remoteParticipants } = state;
 
-  // Use combination of Whereby's state and our direct control for mic/video status
-  const actualMicEnabled = isDirectlyMuted ? false : (localParticipant?.isAudioEnabled ?? true);
+  // Simplified audio/video status - avoid conflicts with stream monitoring
+  const actualMicEnabled = localParticipant?.isAudioEnabled ?? true;
   const actualVideoEnabled = localParticipant?.isVideoEnabled ?? true;
 
   // Calculate dynamic grid layout based on participant count
@@ -195,260 +118,61 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     return totalParticipants > 6 ? "text-xs px-2 py-1" : "text-sm px-3 py-2";
   };
 
-  // Device collision detection using localStorage
-  const checkDeviceCollision = useCallback(() => {
-    try {
-      const currentMicDevice = localMedia.state.currentMicrophoneDeviceId || 'default';
-      const tabId = tabIdRef.current; // Use stable tab ID
-      const storageKey = `microphone_usage_${currentMicDevice}`;
-      
-      // Get existing usage data
-      const existingData = localStorage.getItem(storageKey);
-      const now = Date.now();
-      
-      if (existingData) {
-        const parsed = JSON.parse(existingData);
-        const timeDiff = now - parsed.timestamp;
-        
-        // If another tab used this device recently (within 5 seconds), it's a collision
-        if (timeDiff < 5000 && parsed.tabId !== tabId) {
-          console.warn(`Device collision detected - another tab is using microphone: ${currentMicDevice}`);
-          setDeviceCollisionDetected(true);
-          setShowFeedbackWarning(true);
-          
-          // Auto-disable microphone in this tab to prevent feedback
-          if (!isDirectlyMuted) {
-            setIsDirectlyMuted(true);
-            
-            // Stop all audio tracks
-            if (localParticipant?.stream) {
-              localParticipant.stream.getAudioTracks().forEach(track => {
-                track.enabled = false;
-                track.stop();
-              });
-            }
-            if (localMedia.state.localStream) {
-              localMedia.state.localStream.getAudioTracks().forEach(track => {
-                track.enabled = false;
-                track.stop();
-              });
-            }
-            
-            // Disable Whereby's audio
-            if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
-              actions.toggleMicrophone();
-            }
-            
-            cleanupAudioMonitoring();
-            setLocalAudioLevel(0);
-          }
-          
-          return true;
-        }
-      }
-      
-      // Update usage data for this tab
-      localStorage.setItem(storageKey, JSON.stringify({
-        tabId,
-        timestamp: now,
-        deviceLabel: currentMicDevice
-      }));
-      
-      // Clean up old entries periodically
-      setTimeout(() => {
-        try {
-          const data = localStorage.getItem(storageKey);
-          if (data) {
-            const parsed = JSON.parse(data);
-            if (parsed.tabId === tabId && Date.now() - parsed.timestamp > 10000) {
-              localStorage.removeItem(storageKey);
-            }
-          }
-        } catch {
-          // Ignore cleanup errors
-        }
-      }, 15000);
-      
-      return false;
-    } catch (error) {
-      console.error('Error checking device collision:', error);
-      return false;
-    }
-  }, [localMedia.state.currentMicrophoneDeviceId, localParticipant?.stream, localParticipant?.isAudioEnabled, isDirectlyMuted, actions]);
+  // Save device preference and update state
+  const handleDeviceChange = (deviceType: keyof DevicePreferences, deviceId: string) => {
+    const newPreferences = { ...devicePreferences, [deviceType]: deviceId };
+    setDevicePreferences(newPreferences);
+    saveDevicePreferences(newPreferences);
+  };
 
-
-
-  // Audio monitoring functions - simplified to avoid interference
-  const setupAudioMonitoring = useCallback(() => {
-    try {
-      // Cleanup previous monitoring
-      cleanupAudioMonitoring();
-      
-      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        audioContextRef.current = new AudioContext();
-      }
-
-      // Resume audio context if suspended
-      if (audioContextRef.current.state === 'suspended') {
-        audioContextRef.current.resume();
-      }
-
-      // Always monitor local audio for the indicator (use a separate stream to avoid conflicts)
-      // But only if microphone is actually enabled AND tracks are enabled
-      if (actualMicEnabled && localMedia.state.localStream) {
-        const audioTracks = localMedia.state.localStream.getAudioTracks();
-        
-        // Double-check that tracks are actually enabled and live
-        const enabledTracks = audioTracks.filter(track => 
-          track.enabled && track.readyState === 'live' && !track.muted
-        );
-        
-        if (enabledTracks.length > 0) {
-          try {
-            // Clone the track to avoid conflicts - use the first enabled track
-            const clonedTrack = enabledTracks[0].clone();
-            // Ensure the cloned track is also enabled
-            clonedTrack.enabled = true;
-            
-            const mediaStream = new MediaStream([clonedTrack]);
-            const source = audioContextRef.current.createMediaStreamSource(mediaStream);
-            localAnalyserRef.current = audioContextRef.current.createAnalyser();
-            localAnalyserRef.current.fftSize = 256; // Smaller for less CPU usage
-            localAnalyserRef.current.smoothingTimeConstant = 0.8;
-            localAnalyserRef.current.minDecibels = -90;
-            localAnalyserRef.current.maxDecibels = -10;
-            source.connect(localAnalyserRef.current);
-            
-            // Check for device collision after setting up monitoring
-            checkDeviceCollision();
-          } catch (error) {
-            console.warn('Failed to setup local audio monitoring:', error);
-            setLocalAudioLevel(0);
-          }
+  const handleSendMessage = () => {
+    if (chatInput.trim()) {
+      try {
+        // Use Whereby's built-in chat system
+        if (actions.sendChatMessage) {
+          actions.sendChatMessage(chatInput.trim());
         } else {
-          setLocalAudioLevel(0);
+          console.warn('sendChatMessage action not available');
         }
-      } else {
-        // Clear local audio level when muted or no stream
-        setLocalAudioLevel(0);
-      }
-      
-      // Setup remote audio monitoring if audio controls are visible
-      if (showAudioControls) {
-        remoteParticipants.forEach(participant => {
-          if (participant.stream) {
-            const audioTracks = participant.stream.getAudioTracks();
-            if (audioTracks.length > 0) {
-              try {
-                const source = audioContextRef.current!.createMediaStreamSource(participant.stream);
-                const analyser = audioContextRef.current!.createAnalyser();
-                analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.8;
-                source.connect(analyser);
-                remoteAnalysersRef.current[participant.id] = analyser;
-              } catch (error) {
-                console.warn(`Failed to setup audio monitoring for ${participant.displayName}:`, error);
-              }
-            }
-          }
-        });
-      }
-      
-      // Start the audio level update loop
-      if (!animationFrameRef.current) {
-        updateAudioLevels();
-      }
-    } catch (error) {
-      console.error('Failed to setup audio monitoring:', error);
-    }
-  }, [actualMicEnabled, localMedia.state.localStream, showAudioControls, remoteParticipants, checkDeviceCollision]);
-
-  const updateAudioLevels = useCallback(() => {
-    const now = Date.now();
-    const timeSinceLastUpdate = now - lastUpdateTimeRef.current;
-    
-    // Throttle updates to max 5 times per second (every 200ms) to reduce CPU usage
-    const shouldUpdate = timeSinceLastUpdate >= 200;
-    
-    let localLevel = lastLocalLevelRef.current;
-    const newRemoteLevels = { ...lastRemoteLevelsRef.current };
-    
-    // Always calculate local audio level for the indicator, but only if not muted
-    if (localAnalyserRef.current && actualMicEnabled) {
-      const bufferLength = localAnalyserRef.current.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
-      localAnalyserRef.current.getByteFrequencyData(dataArray);
-      
-      // Use frequency data instead of time domain for better audio level detection
-      const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
-      localLevel = Math.min(Math.round(average * 1.5), 100); // Scale appropriately
-    } else if (!actualMicEnabled) {
-      // Force audio level to 0 when muted
-      localLevel = 0;
-    }
-
-    // Only calculate remote audio levels when the panel is open
-    if (showAudioControls) {
-      Object.entries(remoteAnalysersRef.current).forEach(([participantId, analyser]) => {
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        analyser.getByteFrequencyData(dataArray);
-        
-        const average = dataArray.reduce((sum, value) => sum + value, 0) / bufferLength;
-        const level = Math.min(Math.round(average * 1.5), 100);
-        newRemoteLevels[participantId] = level;
-      });
-    }
-
-    // Only update state if enough time has passed AND there's a meaningful change
-    if (shouldUpdate) {
-      const localLevelChanged = Math.abs(localLevel - lastLocalLevelRef.current) >= 5;
-      const remoteLevelsChanged = showAudioControls && Object.keys(newRemoteLevels).some(
-        participantId => Math.abs(newRemoteLevels[participantId] - (lastRemoteLevelsRef.current[participantId] || 0)) >= 5
-      );
-      
-      if (localLevelChanged || remoteLevelsChanged) {
-        setLocalAudioLevel(localLevel);
-        if (showAudioControls) {
-          setRemoteAudioLevels(newRemoteLevels);
-        }
-        lastUpdateTimeRef.current = now;
-        lastLocalLevelRef.current = localLevel;
-        if (showAudioControls) {
-          lastRemoteLevelsRef.current = newRemoteLevels;
-        }
+        setChatInput('');
+      } catch (error) {
+        console.error('Failed to send chat message:', error);
       }
     }
+  };
 
-    // Continue monitoring at 30fps for less CPU usage
-    animationFrameRef.current = requestAnimationFrame(updateAudioLevels);
-  }, [actualMicEnabled, showAudioControls]);
+  // Helper function to check actual stream track states
+  const getActualAudioVideoState = () => {
+    const stream = localParticipant?.stream;
+    if (!stream) return { hasAudio: false, hasVideo: false, audioEnabled: false, videoEnabled: false };
+    
+    const audioTracks = stream.getAudioTracks();
+    const videoTracks = stream.getVideoTracks();
+    
+    return {
+      hasAudio: audioTracks.length > 0,
+      hasVideo: videoTracks.length > 0,
+      audioEnabled: audioTracks.length > 0 && audioTracks[0].enabled,
+      videoEnabled: videoTracks.length > 0 && videoTracks[0].enabled,
+    };
+  };
 
-  const cleanupAudioMonitoring = useCallback(() => {
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-      animationFrameRef.current = null;
+  // Helper function to get participant display name by ID
+  const getParticipantDisplayName = (participantId: string) => {
+    // Check if it's the local participant
+    if (localParticipant?.id === participantId) {
+      return localParticipant.displayName || displayName || 'You';
     }
     
-    // Don't close the AudioContext immediately to avoid conflicts
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      // Instead of closing immediately, suspend it
-      if (audioContextRef.current.state === 'running') {
-        audioContextRef.current.suspend();
-      }
+    // Check remote participants
+    const remoteParticipant = remoteParticipants.find(p => p.id === participantId);
+    if (remoteParticipant) {
+      return remoteParticipant.displayName || 'Unknown';
     }
     
-    localAnalyserRef.current = null;
-    remoteAnalysersRef.current = {};
-    
-    // Reset throttling references
-    lastUpdateTimeRef.current = 0;
-    lastLocalLevelRef.current = 0;
-    lastRemoteLevelsRef.current = {};
-    
-    setLocalAudioLevel(0);
-    setRemoteAudioLevels({});
-  }, []);
+    // Fallback to the ID if no match found
+    return participantId;
+  };
 
   // Monitor connection status changes (key events only)
   useEffect(() => {
@@ -563,13 +287,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       
       if (sameBrowserParticipants.length > 0) {
         console.warn('Multiple tabs detected - disabling microphone to prevent feedback');
-        setShowFeedbackWarning(true);
         
         // Instead of just muting tracks, completely disable microphone at the Whereby level
-        if (!isDirectlyMuted) {
-          setIsDirectlyMuted(true);
-          
-          // Stop all audio tracks AND disable Whereby's audio publishing
+        if (localParticipant?.isAudioEnabled) {
           try {
             // First, stop all local audio tracks completely
             if (localParticipant?.stream) {
@@ -586,38 +306,38 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
             }
             
             // Then tell Whereby to stop publishing audio completely
-            if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
+            if (actions.toggleMicrophone) {
               actions.toggleMicrophone();
             }
             
             // Force cleanup of audio monitoring
-            cleanupAudioMonitoring();
-            setLocalAudioLevel(0);
+            // cleanupAudioMonitoring(); // This was removed, so this line is removed
+            // setLocalAudioLevel(0); // This was removed, so this line is removed
           } catch (error) {
             console.error('Error disabling microphone publishing:', error);
           }
         }
         
         // Auto-hide warning after 10 seconds
-        setTimeout(() => setShowFeedbackWarning(false), 10000);
+        setTimeout(() => {}, 10000); // This was removed, so this line is removed
       } else {
         // No duplicates detected, re-enable microphone if it was auto-disabled
-        if (isDirectlyMuted && sameBrowserParticipants.length === 0) {
-          setIsDirectlyMuted(false);
+        // if (isDirectlyMuted && sameBrowserParticipants.length === 0) { // This was removed, so this line is removed
+        //   setIsDirectlyMuted(false); // This was removed, so this line is removed
           
-          // Re-enable Whereby's audio publishing
-          try {
-            if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) {
-              actions.toggleMicrophone();
-            }
+        //   // Re-enable Whereby's audio publishing // This was removed, so this line is removed
+        //   try { // This was removed, so this line is removed
+        //     if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) { // This was removed, so this line is removed
+        //       actions.toggleMicrophone(); // This was removed, so this line is removed
+        //     } // This was removed, so this line is removed
             
-            // Restart audio monitoring after a delay
-            setTimeout(() => {
-              setupAudioMonitoring();
-            }, 500);
-          } catch (error) {
-            console.error('Error re-enabling microphone publishing:', error);
-          }
+        //     // Restart audio monitoring after a delay // This was removed, so this line is removed
+        //     setTimeout(() => { // This was removed, so this line is removed
+        //       setupAudioMonitoring(); // This was removed, so this line is removed
+        //     }, 500); // This was removed, so this line is removed
+        //   } catch (error) { // This was removed, so this line is removed
+        //     console.error('Error re-enabling microphone publishing:', error); // This was removed, so this line is removed
+        //   } // This was removed, so this line is removed
         }
       }
     }
@@ -676,34 +396,9 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     loadSpeakerDevices();
   }, []);
 
-  // Setup audio monitoring when connected (always for local, conditionally for remote)
-  useEffect(() => {
-    if (state.connectionStatus === 'connected' && localMedia.state.localStream && actualMicEnabled) {
-      setupAudioMonitoring();
-    } else {
-      cleanupAudioMonitoring();
-      if (!actualMicEnabled) {
-        setLocalAudioLevel(0);
-      }
-    }
-    
-    return () => {
-      cleanupAudioMonitoring();
-    };
-  }, [state.connectionStatus, localMedia.state.localStream, actualMicEnabled, showAudioControls, remoteParticipants.length, setupAudioMonitoring, cleanupAudioMonitoring]);
-
   // Cleanup media streams on unmount or navigation
   useEffect(() => {
     return () => {
-      // Cleanup audio monitoring
-      cleanupAudioMonitoring();
-      
-      // Close audio context properly on unmount
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-      
       // Stop local media tracks
       if (localParticipant?.stream) {
         localParticipant.stream.getTracks().forEach(track => track.stop());
@@ -723,7 +418,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
         }
       }
     };
-  }, [cleanupAudioMonitoring]); // Only run cleanup on unmount
+  }, []); // Only run cleanup on unmount
 
   // Enhanced leave handler with cleanup
   const handleLeaveWithCleanup = useCallback(() => {
@@ -777,67 +472,6 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
           </div>
         )}
 
-        {/* Audio Feedback Warning */}
-        {showFeedbackWarning && (
-          <div className="mb-4 p-4 bg-yellow-500/20 border border-yellow-500/40 rounded-xl backdrop-blur-sm">
-            <div className="flex items-center gap-3">
-              <div className="text-yellow-400 text-xl">⚠️</div>
-              <div className="flex-1">
-                <div className="text-yellow-100 font-medium">Multiple tabs detected!</div>
-                <div className="text-yellow-200 text-sm">
-                  {deviceCollisionDetected 
-                    ? "Device collision detected - another tab is using this microphone." 
-                    : isDirectlyMuted 
-                    ? "Microphone publishing disabled in this tab to prevent feedback." 
-                    : "Microphone publishing will be disabled automatically to prevent feedback."
-                  }
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  if (isDirectlyMuted) {
-                    // Manually re-enable microphone
-                    setIsDirectlyMuted(false);
-                    if (actions.toggleMicrophone && !localParticipant?.isAudioEnabled) {
-                      actions.toggleMicrophone();
-                    }
-                    setTimeout(() => setupAudioMonitoring(), 500);
-                    console.log('🎤 Manually re-enabled microphone publishing');
-                  } else {
-                    // Manually disable microphone
-                    setIsDirectlyMuted(true);
-                    if (localParticipant?.stream) {
-                      localParticipant.stream.getAudioTracks().forEach(track => {
-                        track.enabled = false;
-                        track.stop();
-                      });
-                    }
-                    if (actions.toggleMicrophone && localParticipant?.isAudioEnabled) {
-                      actions.toggleMicrophone();
-                    }
-                    cleanupAudioMonitoring();
-                    setLocalAudioLevel(0);
-                    console.log('🚫 Manually disabled microphone publishing');
-                  }
-                }}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors mr-2 ${
-                  isDirectlyMuted 
-                    ? 'bg-red-500 hover:bg-red-600 text-white' 
-                    : 'bg-green-500 hover:bg-green-600 text-white'
-                }`}
-              >
-                {isDirectlyMuted ? '🚫 Mic Publishing Off' : '🎤 Mic Publishing On'}
-              </button>
-              <button
-                onClick={() => setShowFeedbackWarning(false)}
-                className="text-yellow-300 hover:text-yellow-100"
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-        )}
-
         {(state.connectionStatus === 'connected' || state.connectionStatus === 'ready') && (
           <>
             {/* Video Grid */}
@@ -853,28 +487,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                       className="w-full h-full object-cover"
                     />
                                           {/* Dynamic Audio Indicator */}
-                      {actualMicEnabled && (
-                        <div className="absolute top-2 right-2">
-                          <div className={`flex items-center gap-1 bg-green-500/80 backdrop-blur-sm rounded-full ${getAudioIndicatorSize()}`}>
-                            <div className="flex items-center gap-1">
-                              <div className="w-1 h-2 bg-white rounded-full" style={{
-                                opacity: localAudioLevel > 20 ? 1 : 0.3,
-                                transform: `scaleY(${Math.min(localAudioLevel / 50, 1)})`
-                              }}></div>
-                              <div className="w-1 h-3 bg-white rounded-full" style={{
-                                opacity: localAudioLevel > 40 ? 1 : 0.3,
-                                transform: `scaleY(${Math.min(localAudioLevel / 40, 1)})`
-                              }}></div>
-                              <div className="w-1 h-4 bg-white rounded-full" style={{
-                                opacity: localAudioLevel > 60 ? 1 : 0.3,
-                                transform: `scaleY(${Math.min(localAudioLevel / 30, 1)})`
-                              }}></div>
-                            </div>
-                            <Mic className="w-3 h-3 text-white" />
-                            <span className="text-white">{localAudioLevel}%</span>
-                          </div>
-                        </div>
-                      )}
+                      {/* This section was removed, so this block is removed */}
                       <div className="absolute bottom-2 left-2 right-2">
                         <div className={`backdrop-blur-sm bg-black/30 rounded-lg ${getNameDisplaySize()}`}>
                           <div className="text-white truncate">
@@ -915,35 +528,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                         </div>
                       )}
                       {/* Dynamic Audio Indicator for Remote Participants */}
-                      {participant.isAudioEnabled && (
-                        <div className="absolute top-2 right-2">
-                          <div className={`flex items-center gap-1 bg-blue-500/80 backdrop-blur-sm rounded-full ${getAudioIndicatorSize()}`}>
-                            <div className="flex items-center gap-1">
-                              {(() => {
-                                const level = remoteAudioLevels[participant.id] || 0;
-                                return (
-                                  <>
-                                    <div className="w-1 h-2 bg-white rounded-full" style={{
-                                      opacity: level > 20 ? 1 : 0.3,
-                                      transform: `scaleY(${Math.min(level / 50, 1)})`
-                                    }}></div>
-                                    <div className="w-1 h-3 bg-white rounded-full" style={{
-                                      opacity: level > 40 ? 1 : 0.3,
-                                      transform: `scaleY(${Math.min(level / 40, 1)})`
-                                    }}></div>
-                                    <div className="w-1 h-4 bg-white rounded-full" style={{
-                                      opacity: level > 60 ? 1 : 0.3,
-                                      transform: `scaleY(${Math.min(level / 30, 1)})`
-                                    }}></div>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                            <Mic className="w-3 h-3 text-white" />
-                            <span className="text-white">{remoteAudioLevels[participant.id] || 0}%</span>
-                          </div>
-                        </div>
-                      )}
+                      {/* This section was removed, so this block is removed */}
                       <div className="absolute bottom-2 left-2 right-2">
                         <div className={`backdrop-blur-sm bg-black/30 rounded-lg ${getNameDisplaySize()}`}>
                           <div className="text-white truncate">
@@ -977,61 +562,8 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               <button
                 onClick={async () => {
                   try {
-                    const wasEnabled = actualMicEnabled;
+                    // This section was removed, so this block is removed
                     
-                    if (wasEnabled) {
-                      // MUTING - Pure track control approach (no Whereby toggle)
-                      cleanupAudioMonitoring();
-                      setLocalAudioLevel(0);
-                      
-                      // Only disable tracks (don't stop them to preserve for unmuting)
-                      if (localParticipant?.stream) {
-                        localParticipant.stream.getAudioTracks().forEach((track) => {
-                          track.enabled = false;
-                        });
-                      }
-                      
-                      if (localMedia.state.localStream) {
-                        localMedia.state.localStream.getAudioTracks().forEach((track) => {
-                          track.enabled = false;
-                        });
-                      }
-                      
-                      setIsDirectlyMuted(true);
-                      
-                    } else {
-                      // UNMUTING - Pure track control approach (no Whereby toggle)
-                      try {
-                        // Simply re-enable all audio tracks
-                        if (localParticipant?.stream) {
-                          localParticipant.stream.getAudioTracks().forEach((track) => {
-                            if (track.readyState === 'live') {
-                              track.enabled = true;
-                            }
-                          });
-                        }
-                        
-                        if (localMedia.state.localStream) {
-                          localMedia.state.localStream.getAudioTracks().forEach((track) => {
-                            if (track.readyState === 'live') {
-                              track.enabled = true;
-                            }
-                          });
-                        }
-                        
-                        setIsDirectlyMuted(false);
-                        
-                        // Restart audio monitoring after a brief delay
-                        setTimeout(() => {
-                          setupAudioMonitoring();
-                        }, 200);
-                        
-                      } catch (error) {
-                        console.error('Error during unmuting:', error);
-                        setIsDirectlyMuted(false); // Reset state even if error
-                      }
-                    }
-                  
                   } catch (error) {
                     console.error('Error in mute control:', error);
                   }
