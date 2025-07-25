@@ -56,7 +56,7 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
   });
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
   
-  // Initialize media with saved device preferences
+  // Initialize media with basic settings
   const localMedia = useLocalMedia({
     audio: true,
     video: true,
@@ -150,6 +150,60 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
       }
     }
   };
+
+  // Apply saved device preferences when local stream is ready
+  useEffect(() => {
+    const applyDevicePreferences = async () => {
+      if (!localParticipant?.stream || !devicePreferences.cameraDeviceId) return;
+      
+      try {
+        console.log('📹 Applying saved camera preference:', devicePreferences.cameraDeviceId);
+        
+        // Get new stream with preferred camera
+        const constraints: MediaStreamConstraints = {
+          video: { deviceId: { exact: devicePreferences.cameraDeviceId } },
+          audio: devicePreferences.microphoneDeviceId 
+            ? { deviceId: { exact: devicePreferences.microphoneDeviceId } }
+            : true
+        };
+        
+        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        // Replace video track in existing stream
+        const videoTrack = newStream.getVideoTracks()[0];
+        const audioTrack = newStream.getAudioTracks()[0];
+        
+        if (videoTrack && localParticipant.stream) {
+          // Replace video track
+          const oldVideoTrack = localParticipant.stream.getVideoTracks()[0];
+          if (oldVideoTrack) {
+            localParticipant.stream.removeTrack(oldVideoTrack);
+            oldVideoTrack.stop();
+          }
+          localParticipant.stream.addTrack(videoTrack);
+        }
+        
+        if (audioTrack && localParticipant.stream && devicePreferences.microphoneDeviceId) {
+          // Replace audio track
+          const oldAudioTrack = localParticipant.stream.getAudioTracks()[0];
+          if (oldAudioTrack) {
+            localParticipant.stream.removeTrack(oldAudioTrack);
+            oldAudioTrack.stop();
+          }
+          localParticipant.stream.addTrack(audioTrack);
+        }
+        
+        console.log('✅ Device preferences applied successfully');
+        
+      } catch (error) {
+        console.error('❌ Failed to apply device preferences:', error);
+      }
+    };
+
+    if (localParticipant?.stream && (devicePreferences.cameraDeviceId || devicePreferences.microphoneDeviceId)) {
+      applyDevicePreferences();
+    }
+  }, [localParticipant?.stream, devicePreferences.cameraDeviceId, devicePreferences.microphoneDeviceId]);
 
   // Auto-join room when connection is ready
   useEffect(() => {
@@ -581,6 +635,23 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 <p>Camera: {devicePreferences.cameraDeviceId || 'default'}</p>
                 <p>Microphone: {devicePreferences.microphoneDeviceId || 'default'}</p>
                 <p>Speaker: {devicePreferences.speakerDeviceId || 'default'}</p>
+              </div>
+              <p><strong>Current Stream Info:</strong></p>
+              <div className="ml-4 text-xs">
+                <p>Video Tracks: {localParticipant?.stream?.getVideoTracks().length || 0}</p>
+                <p>Audio Tracks: {localParticipant?.stream?.getAudioTracks().length || 0}</p>
+                {localParticipant?.stream?.getVideoTracks().map((track, i) => (
+                  <p key={i}>Video {i}: {track.label} ({track.getSettings().deviceId})</p>
+                ))}
+                {localParticipant?.stream?.getAudioTracks().map((track, i) => (
+                  <p key={i}>Audio {i}: {track.label} ({track.getSettings().deviceId})</p>
+                ))}
+              </div>
+              <p><strong>Available Actions:</strong></p>
+              <div className="ml-4 text-xs">
+                <p>toggleCamera: available</p>
+                <p>toggleMicrophone: available</p>
+                <p>Actions count: {Object.keys(actions).length}</p>
               </div>
             </div>
           </div>
