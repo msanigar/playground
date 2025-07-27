@@ -5,6 +5,7 @@ export default class CanvasServer implements Party.Server {
 
   onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
     // A user connected to the Canvas room
+    void ctx; // Mark as used to avoid TypeScript warning
     console.log(`User ${conn.id} connected to Canvas room ${this.room.id}`);
     
     // Notify existing connections about the new user

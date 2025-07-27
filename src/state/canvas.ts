@@ -218,28 +218,39 @@ export const useCanvasStore = create<CanvasStore>()(
       },
 
       continueDrawing: (x, y, pressure = 1) => {
-        const { currentStroke, isDrawing } = get();
+        const { currentStroke, isDrawing, strokes } = get();
         if (!isDrawing || !currentStroke) return;
         
         const point: DrawingPoint = { x, y, pressure, timestamp: Date.now() };
         
-        set((state) => ({
-          strokes: state.strokes.map(stroke =>
-            stroke.id === currentStroke.id
-              ? { ...stroke, points: [...stroke.points, point] }
-              : stroke
-          ),
-          currentStroke: currentStroke ? { ...currentStroke, points: [...currentStroke.points, point] } : null,
-        }));
+        // Efficient update: directly mutate current stroke points and find stroke index once
+        const strokeIndex = strokes.findIndex(s => s.id === currentStroke.id);
+        if (strokeIndex === -1) return;
         
-        // Emit to collaborators
-        const operation: CanvasOperation = {
-          type: 'stroke-update',
-          strokeId: currentStroke.id,
-          point,
+        // Create new arrays only for the specific stroke that changed
+        const updatedStroke = {
+          ...currentStroke,
+          points: [...currentStroke.points, point]
         };
         
-        get().addOptimisticOperation(operation);
+        const newStrokes = [...strokes];
+        newStrokes[strokeIndex] = updatedStroke;
+        
+        set({
+          strokes: newStrokes,
+          currentStroke: updatedStroke,
+        });
+        
+        // Throttle collaborative updates to reduce network overhead (every 3rd point)
+        if (updatedStroke.points.length % 3 === 0) {
+          const operation: CanvasOperation = {
+            type: 'stroke-update',
+            strokeId: currentStroke.id,
+            point,
+          };
+          
+          get().addOptimisticOperation(operation);
+        }
       },
 
       stopDrawing: () => {

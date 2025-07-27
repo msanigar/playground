@@ -293,17 +293,11 @@ export default function Canvas() {
     }
     
     if (isDrawing) {
-      // Use requestAnimationFrame for smooth drawing on mouse too
-      pendingDrawPoint.current = { x, y };
-      
-      if (!animationFrameRef.current) {
-        animationFrameRef.current = requestAnimationFrame(() => {
-          if (pendingDrawPoint.current && isDrawing) {
-            continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
-            pendingDrawPoint.current = null;
-          }
-          animationFrameRef.current = null;
-        });
+      // Use simple throttling for mouse too: only update every 8ms (120fps max)
+      const now = Date.now();
+      if (now - lastDrawTime.current > 8) {
+        continueDrawing(x, y);
+        lastDrawTime.current = now;
       }
     }
   }, [getEventPosition, isConnected, isDrawing, continueDrawing]);
@@ -311,32 +305,12 @@ export default function Canvas() {
   const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     if (isDrawing) {
-      // Cancel any pending animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      // Process any final pending point
-      if (pendingDrawPoint.current) {
-        continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
-        pendingDrawPoint.current = null;
-      }
       stopDrawing();
     }
-  }, [isDrawing, stopDrawing, continueDrawing]);
+  }, [isDrawing, stopDrawing]);
   
   const handleCanvasMouseLeave = useCallback(() => {
     if (isDrawing) {
-      // Cancel any pending animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
-      // Process any final pending point
-      if (pendingDrawPoint.current) {
-        continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
-        pendingDrawPoint.current = null;
-      }
       stopDrawing();
     }
     
@@ -344,12 +318,11 @@ export default function Canvas() {
     if (canvasServiceRef.current && isConnected) {
       canvasServiceRef.current.removeCursor();
     }
-  }, [isDrawing, stopDrawing, isConnected, continueDrawing]);
+  }, [isDrawing, stopDrawing, isConnected]);
 
     // Performance optimization refs
   const lastCursorUpdate = useRef<number>(0);
-  const animationFrameRef = useRef<number | null>(null);
-  const pendingDrawPoint = useRef<{x: number, y: number} | null>(null);
+  const lastDrawTime = useRef<number>(0);
 
   // Touch event handlers for mobile support with proper passive event handling
   useEffect(() => {
@@ -376,17 +349,11 @@ export default function Canvas() {
       }
       
       if (isDrawing) {
-        // Use requestAnimationFrame for smooth drawing
-        pendingDrawPoint.current = { x, y };
-        
-        if (!animationFrameRef.current) {
-          animationFrameRef.current = requestAnimationFrame(() => {
-            if (pendingDrawPoint.current && isDrawing) {
-              continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
-              pendingDrawPoint.current = null;
-            }
-            animationFrameRef.current = null;
-          });
+        // Use simple throttling: only update every 8ms (120fps max) for better performance
+        const now = Date.now();
+        if (now - lastDrawTime.current > 8) {
+          continueDrawing(x, y);
+          lastDrawTime.current = now;
         }
       }
     };
@@ -394,16 +361,6 @@ export default function Canvas() {
     const handleTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
       if (isDrawing) {
-        // Cancel any pending animation frame
-        if (animationFrameRef.current) {
-          cancelAnimationFrame(animationFrameRef.current);
-          animationFrameRef.current = null;
-        }
-        // Process any final pending point
-        if (pendingDrawPoint.current) {
-          continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
-          pendingDrawPoint.current = null;
-        }
         stopDrawing();
       }
     };
@@ -417,12 +374,6 @@ export default function Canvas() {
       canvas.removeEventListener('touchstart', handleTouchStart);
       canvas.removeEventListener('touchmove', handleTouchMove);
       canvas.removeEventListener('touchend', handleTouchEnd);
-      
-      // Cleanup any pending animation frame
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = null;
-      }
     };
   }, [getEventPosition, startDrawing, isConnected, isDrawing, continueDrawing, stopDrawing]);
 
