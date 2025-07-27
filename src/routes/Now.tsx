@@ -205,14 +205,17 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
   const cacheKey = 'weather_cache';
   const cacheDateKey = 'weather_cache_date';
   const locationCacheKey = 'weather_location_cache';
+  const cacheVersionKey = 'weather_cache_version';
+  const currentCacheVersion = '1.1'; // Increment this when we change location formatting
   const today = new Date().toISOString().slice(0, 10);
 
   const cachedWeather = localStorage.getItem(cacheKey);
   const cacheDate = localStorage.getItem(cacheDateKey);
   const cachedLocation = localStorage.getItem(locationCacheKey);
+  const cachedVersion = localStorage.getItem(cacheVersionKey);
 
-  // Check if we have recent cached data (same day)
-  if (cachedWeather && cacheDate === today) {
+  // Check if we have recent cached data (same day) and correct version
+  if (cachedWeather && cacheDate === today && cachedVersion === currentCacheVersion) {
     try {
       const weatherData = JSON.parse(cachedWeather);
       // Use cached location if available to avoid API calls
@@ -226,7 +229,17 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
       localStorage.removeItem(cacheKey);
       localStorage.removeItem(cacheDateKey);
       localStorage.removeItem(locationCacheKey);
+      localStorage.removeItem(cacheVersionKey);
     }
+  }
+
+  // Clear old cache if version doesn't match
+  if (cachedWeather && cachedVersion !== currentCacheVersion) {
+    console.log('🔄 Cache version mismatch, clearing old weather cache');
+    localStorage.removeItem(cacheKey);
+    localStorage.removeItem(cacheDateKey);
+    localStorage.removeItem(locationCacheKey);
+    localStorage.removeItem(cacheVersionKey);
   }
 
   return new Promise((resolve) => {
@@ -330,9 +343,10 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
           };
 
           console.log('🌍 Weather data fetched successfully:', locationName);
-          localStorage.setItem(cacheKey, JSON.stringify(weatherData));
-          localStorage.setItem(cacheDateKey, today);
-          localStorage.setItem(locationCacheKey, locationName);
+                  localStorage.setItem(cacheKey, JSON.stringify(weatherData));
+        localStorage.setItem(cacheDateKey, today);
+        localStorage.setItem(locationCacheKey, locationName);
+        localStorage.setItem(cacheVersionKey, currentCacheVersion);
           
           resolve(weatherData);
         } catch (error) {
