@@ -388,51 +388,64 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                   </button>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-blue-200 text-sm font-medium mb-2">Camera</label>
-                    <select
-                      value={devicePreferences.cameraDeviceId || ''}
-                      onChange={(e) => handleDeviceChange('cameraDeviceId', e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                    >
-                      {devices.cameras.map((camera) => (
-                        <option key={camera.deviceId} value={camera.deviceId}>
-                          {camera.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="grid grid-cols-1 gap-4">
+                  {devices.cameras.length > 0 && (
+                    <div>
+                      <label className="block text-blue-200 text-sm font-medium mb-2">Camera</label>
+                      <select
+                        value={devicePreferences.cameraDeviceId || ''}
+                        onChange={(e) => handleDeviceChange('cameraDeviceId', e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                      >
+                        {devices.cameras.map((camera) => (
+                          <option key={camera.deviceId} value={camera.deviceId}>
+                            {camera.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   
-                  <div>
-                    <label className="block text-blue-200 text-sm font-medium mb-2">Microphone</label>
-                    <select
-                      value={devicePreferences.microphoneDeviceId || ''}
-                      onChange={(e) => handleDeviceChange('microphoneDeviceId', e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                    >
-                      {devices.microphones.map((mic) => (
-                        <option key={mic.deviceId} value={mic.deviceId}>
-                          {mic.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {devices.microphones.length > 0 && (
+                    <div>
+                      <label className="block text-blue-200 text-sm font-medium mb-2">Microphone</label>
+                      <select
+                        value={devicePreferences.microphoneDeviceId || ''}
+                        onChange={(e) => handleDeviceChange('microphoneDeviceId', e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                      >
+                        {devices.microphones.map((mic) => (
+                          <option key={mic.deviceId} value={mic.deviceId}>
+                            {mic.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   
-                  <div>
-                    <label className="block text-blue-200 text-sm font-medium mb-2">Speaker</label>
-                    <select
-                      value={devicePreferences.speakerDeviceId || ''}
-                      onChange={(e) => handleDeviceChange('speakerDeviceId', e.target.value)}
-                      className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
-                    >
-                      {devices.speakers.map((speaker) => (
-                        <option key={speaker.deviceId} value={speaker.deviceId}>
-                          {speaker.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {devices.speakers.length > 0 && (
+                    <div>
+                      <label className="block text-blue-200 text-sm font-medium mb-2">Speaker</label>
+                      <select
+                        value={devicePreferences.speakerDeviceId || ''}
+                        onChange={(e) => handleDeviceChange('speakerDeviceId', e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:border-blue-500 focus:outline-none text-sm"
+                      >
+                        {devices.speakers.map((speaker) => (
+                          <option key={speaker.deviceId} value={speaker.deviceId}>
+                            {speaker.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  
+                  {/* Show message if no devices available */}
+                  {devices.cameras.length === 0 && devices.microphones.length === 0 && devices.speakers.length === 0 && (
+                    <div className="text-center py-4">
+                      <p className="text-gray-400 text-sm">No configurable devices available on this platform</p>
+                    </div>
+                  )}
                 </div>
                 
                 <div className="mt-4 p-3 bg-blue-500/20 border border-blue-500/40 rounded">
@@ -544,11 +557,11 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
               )}
             </div>
 
-            {/* Controls */}
-            <div className="flex justify-center gap-4 mb-6">
+            {/* Controls - Mobile Responsive */}
+            <div className="flex flex-wrap justify-center gap-2 sm:gap-3 lg:gap-4 mb-6 px-2">
               <button
                 onClick={handleMicToggle}
-                className={`p-4 rounded-full transition-all duration-200 relative ${
+                className={`p-3 sm:p-4 rounded-full transition-all duration-200 relative ${
                   actualMicEnabled 
                     ? 'bg-green-500 hover:bg-green-600' 
                     : 'bg-red-500 hover:bg-red-600 ring-2 ring-red-300'
@@ -556,10 +569,10 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
                 title={actualMicEnabled ? 'Mute microphone' : 'Unmute microphone'}
               >
                 {actualMicEnabled ? (
-                  <Mic className="w-6 h-6 text-white" />
+                  <Mic className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 ) : (
                   <>
-                    <MicOff className="w-6 h-6 text-white" />
+                    <MicOff className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-400 rounded-full animate-pulse"></div>
                   </>
                 )}
@@ -567,58 +580,58 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
               <button
                 onClick={() => actions.toggleCamera?.()}
-                className={`p-4 rounded-full transition-all duration-200 ${
+                className={`p-3 sm:p-4 rounded-full transition-all duration-200 ${
                   actualVideoEnabled 
                     ? 'bg-green-500 hover:bg-green-600' 
                     : 'bg-red-500 hover:bg-red-600'
                 }`}
               >
                 {actualVideoEnabled ? (
-                  <Video className="w-6 h-6 text-white" />
+                  <Video className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 ) : (
-                  <VideoOff className="w-6 h-6 text-white" />
+                  <VideoOff className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                 )}
               </button>
 
               <button
                 onClick={() => setShowDeviceSettings(!showDeviceSettings)}
-                className={`p-4 rounded-full transition-all duration-200 ${
+                className={`p-3 sm:p-4 rounded-full transition-all duration-200 ${
                   showDeviceSettings 
                     ? 'bg-purple-500 hover:bg-purple-600' 
                     : 'bg-gray-600 hover:bg-gray-700'
                 }`}
               >
-                <Settings className="w-6 h-6 text-white" />
+                <Settings className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </button>
 
               <button
                 onClick={() => setShowChat(!showChat)}
-                className={`p-4 rounded-full transition-all duration-200 ${
+                className={`p-3 sm:p-4 rounded-full transition-all duration-200 ${
                   showChat 
                     ? 'bg-blue-500 hover:bg-blue-600' 
                     : 'bg-gray-600 hover:bg-gray-700'
                 }`}
               >
-                <MessageCircle className="w-6 h-6 text-white" />
+                <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </button>
 
               <button
                 onClick={toggleDebug}
-                className={`p-4 rounded-full transition-all duration-200 ${
+                className={`p-3 sm:p-4 rounded-full transition-all duration-200 ${
                   showDebug 
                     ? 'bg-orange-500 hover:bg-orange-600' 
                     : 'bg-gray-600 hover:bg-gray-700'
                 }`}
                 title="Debug Info"
               >
-                <span className="text-white text-sm font-mono">DB</span>
+                <span className="text-white text-xs sm:text-sm font-mono">DB</span>
               </button>
 
               <button
                 onClick={handleLeave}
-                className="p-4 rounded-full bg-red-500 hover:bg-red-600 transition-all duration-200"
+                className="p-3 sm:p-4 rounded-full bg-red-500 hover:bg-red-600 transition-all duration-200"
               >
-                <Phone className="w-6 h-6 text-white" />
+                <Phone className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </button>
             </div>
           </>

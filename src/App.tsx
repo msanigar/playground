@@ -42,31 +42,38 @@ function InnerApp({
   return (
     <div className="min-h-screen transition-colors bg-white text-black dark:bg-gray-900 dark:text-white">
       {/* NAV */}
-      <nav className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex gap-2 sm:gap-4">
-          {['now', 'next', 'focus', 'canvas', 'notes', 'video'].map((path) => (
-            <NavLink
-              key={path}
-              to={`/${path}`}
-              className={({ isActive }) =>
-                `px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white dark:bg-blue-500'
-                    : 'text-blue-600 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-gray-800'
-                }`
-              }
-            >
-              {path.charAt(0).toUpperCase() + path.slice(1)}
-            </NavLink>
-          ))}
-        </div>
+      <nav className="border-b border-gray-200 dark:border-gray-700">
+        {/* Mobile-first responsive navigation */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4">
+          {/* Navigation tabs with horizontal scroll on mobile */}
+          <div className="flex-1 overflow-x-auto">
+            <div className="flex gap-1 sm:gap-2 min-w-max">
+              {['now', 'next', 'focus', 'canvas', 'notes', 'video'].map((path) => (
+                <NavLink
+                  key={path}
+                  to={`/${path}`}
+                  className={({ isActive }) =>
+                    `px-3 py-2 rounded-full text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
+                      isActive
+                        ? 'bg-blue-600 text-white dark:bg-blue-500'
+                        : 'text-blue-600 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-gray-800'
+                    }`
+                  }
+                >
+                  {path.charAt(0).toUpperCase() + path.slice(1)}
+                </NavLink>
+              ))}
+            </div>
+          </div>
 
-        <button
-          onClick={() => setDarkMode(!darkMode)}
-          className="text-sm border px-3 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-        >
-          {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
-        </button>
+          {/* Dark mode toggle */}
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="text-xs sm:text-sm border px-3 py-2 rounded hover:bg-gray-100 dark:hover:bg-gray-800 dark:border-gray-600 self-start sm:self-auto shrink-0"
+          >
+            {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
+          </button>
+        </div>
       </nav>
 
       {/* ROUTES */}

@@ -246,32 +246,32 @@ function StatsPanel({ statsPromise }: { statsPromise: Promise<NotesStats> }) {
   
   return (
     <motion.div
-      className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-6 space-y-4"
+      className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-4 lg:p-6 space-y-4"
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
     >
       <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">Statistics</h3>
       
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div className="text-center p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.totalNotes}</div>
-          <div className="text-gray-600 dark:text-gray-400">Notes</div>
+      <div className="grid grid-cols-2 lg:grid-cols-2 gap-3 lg:gap-4 text-sm">
+        <div className="text-center p-2 lg:p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
+          <div className="text-xl lg:text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.totalNotes}</div>
+          <div className="text-gray-600 dark:text-gray-400 text-xs lg:text-sm">Notes</div>
         </div>
         
-        <div className="text-center p-3 bg-green-50 dark:bg-green-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.totalWords}</div>
-          <div className="text-gray-600 dark:text-gray-400">Words</div>
+        <div className="text-center p-2 lg:p-3 bg-green-50 dark:bg-green-900/30 rounded-lg">
+          <div className="text-xl lg:text-2xl font-bold text-green-600 dark:text-green-400">{stats.totalWords}</div>
+          <div className="text-gray-600 dark:text-gray-400 text-xs lg:text-sm">Words</div>
         </div>
         
-        <div className="text-center p-3 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
-          <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.avgWordsPerNote}</div>
-          <div className="text-gray-600 dark:text-gray-400">Avg/Note</div>
+        <div className="text-center p-2 lg:p-3 bg-purple-50 dark:bg-purple-900/30 rounded-lg">
+          <div className="text-xl lg:text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.avgWordsPerNote}</div>
+          <div className="text-gray-600 dark:text-gray-400 text-xs lg:text-sm">Avg/Note</div>
         </div>
         
-        <div className="text-center p-3 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
-          <div className="text-xl font-bold text-orange-600 dark:text-orange-400">📝</div>
-          <div className="text-gray-600 dark:text-gray-400">Active</div>
+        <div className="text-center p-2 lg:p-3 bg-orange-50 dark:bg-orange-900/30 rounded-lg">
+          <div className="text-lg lg:text-xl font-bold text-orange-600 dark:text-orange-400">📝</div>
+          <div className="text-gray-600 dark:text-gray-400 text-xs lg:text-sm">Active</div>
         </div>
       </div>
 
@@ -486,9 +486,9 @@ export default function Notes() {
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-7.5rem)] flex gap-6">
+    <div className="relative w-full h-[calc(100vh-7.5rem)] flex flex-col lg:flex-row gap-4 lg:gap-6">
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col space-y-6">
+      <div className="flex-1 flex flex-col space-y-4 lg:space-y-6 min-h-0">
         {/* Header with Add Note Form */}
         <motion.div
           className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-6 shadow-lg"
@@ -615,28 +615,28 @@ export default function Notes() {
         </div>
       </div>
 
-      {/* Sidebar */}
-      <div className="w-80 space-y-6">
+      {/* Sidebar - Responsive */}
+      <div className="lg:w-80 space-y-4 lg:space-y-6 order-first lg:order-last">
         {/* Statistics Panel with Suspense */}
         <Suspense fallback={<StatsLoading />}>
           <StatsPanel statsPromise={statsPromise} />
         </Suspense>
 
-        {/* Quick Actions */}
+        {/* Quick Actions - Mobile Optimized */}
         <motion.div
-          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-6"
+          className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-xl border border-gray-200/50 dark:border-gray-700/50 p-4 lg:p-6"
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
         >
           <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">Quick Actions</h3>
-          <div className="space-y-3">
+          <div className="flex lg:flex-col gap-3">
             <motion.button
               onClick={() => console.log('Export notes')}
-              className="w-full p-3 text-left text-blue-700 dark:text-blue-300
+              className="flex-1 lg:w-full p-3 text-center lg:text-left text-blue-700 dark:text-blue-300
                          bg-gradient-to-r from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 
                          dark:from-blue-900/30 dark:to-blue-800/30 dark:hover:from-blue-800/40 dark:hover:to-blue-700/40
-                         rounded-lg transition-colors"
+                         rounded-lg transition-colors text-sm lg:text-base"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >
@@ -644,10 +644,10 @@ export default function Notes() {
             </motion.button>
             <motion.button
               onClick={() => console.log('Clear all notes')}
-              className="w-full p-3 text-left text-red-700 dark:text-red-300
+              className="flex-1 lg:w-full p-3 text-center lg:text-left text-red-700 dark:text-red-300
                          bg-gradient-to-r from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 
                          dark:from-red-900/30 dark:to-red-800/30 dark:hover:from-red-800/40 dark:hover:to-red-700/40
-                         rounded-lg transition-colors"
+                         rounded-lg transition-colors text-sm lg:text-base"
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
             >

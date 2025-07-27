@@ -299,14 +299,14 @@ export default function Next() {
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         {/* Main Events List */}
         <div className="xl:col-span-3 space-y-4">
-          {/* Filter Tabs */}
-          <div className="flex items-center justify-between">
-            <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+          {/* Filter Tabs and Add Button */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg overflow-x-auto">
               {(['all', 'pending', 'completed'] as const).map((f) => (
                 <motion.button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  className={`px-3 sm:px-4 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
                     filter === f
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
@@ -324,7 +324,7 @@ export default function Next() {
             
             <motion.button
               onClick={() => setOpen(true)}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition-colors"
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg shadow hover:bg-blue-700 transition-colors w-full sm:w-auto"
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >

@@ -130,24 +130,102 @@ async function fetchDailyQuote(): Promise<QuoteData> {
   return selectedQuote;
 }
 
+// Country name mapping for more concise display
+const COUNTRY_MAPPINGS: Record<string, string> = {
+  'United Kingdom of Great Britain and Northern Ireland (the)': 'UK',
+  'United Kingdom of Great Britain and Northern Ireland': 'UK',
+  'United Kingdom': 'UK',
+  'United States of America (the)': 'USA',
+  'United States of America': 'USA',
+  'United States': 'USA',
+  'Russian Federation (the)': 'Russia',
+  'Russian Federation': 'Russia',
+  'Republic of Korea': 'South Korea',
+  'Democratic People\'s Republic of Korea': 'North Korea',
+  'People\'s Republic of China': 'China',
+  'Federal Republic of Germany': 'Germany',
+  'French Republic': 'France',
+  'Italian Republic': 'Italy',
+  'Kingdom of Spain': 'Spain',
+  'Commonwealth of Australia': 'Australia',
+  'Dominion of Canada': 'Canada',
+  'Federative Republic of Brazil': 'Brazil',
+  'United Mexican States': 'Mexico',
+  'Republic of India': 'India',
+  'State of Japan': 'Japan',
+  'Republic of South Africa': 'South Africa',
+  'Arab Republic of Egypt': 'Egypt',
+  'Islamic Republic of Iran': 'Iran',
+  'Republic of Turkey': 'Turkey',
+  'Kingdom of Saudi Arabia': 'Saudi Arabia',
+  'United Arab Emirates (the)': 'UAE',
+  'United Arab Emirates': 'UAE',
+  'Kingdom of the Netherlands': 'Netherlands',
+  'Swiss Confederation': 'Switzerland',
+  'Republic of Austria': 'Austria',
+  'Kingdom of Belgium': 'Belgium',
+  'Portuguese Republic': 'Portugal',
+  'Kingdom of Sweden': 'Sweden',
+  'Kingdom of Norway': 'Norway',
+  'Republic of Finland': 'Finland',
+  'Republic of Ireland': 'Ireland',
+  'Hellenic Republic': 'Greece',
+  'Kingdom of Denmark': 'Denmark'
+};
+
+function formatLocationName(locationData: { city?: string; town?: string; locality?: string; village?: string; hamlet?: string; countryName?: string; country?: string; principalSubdivision?: string }): string {
+  // Extract city/locality and country
+  const city = locationData.city || locationData.town || locationData.locality || locationData.village || locationData.hamlet;
+  let country = locationData.countryName || locationData.country;
+  
+  // Apply country mapping for concise names
+  if (country && COUNTRY_MAPPINGS[country]) {
+    country = COUNTRY_MAPPINGS[country];
+  }
+  
+  // Return formatted location
+  if (city && country) {
+    // For UK, be more specific with region if available
+    if (country === 'UK' && locationData.principalSubdivision) {
+      const region = locationData.principalSubdivision.replace(' (the)', '');
+      if (region !== city && !['England', 'Scotland', 'Wales', 'Northern Ireland'].includes(region)) {
+        return `${city}, ${region}, ${country}`;
+      }
+    }
+    return `${city}, ${country}`;
+  } else if (country) {
+    return country;
+  }
+  
+  return 'Current Location';
+}
+
 async function fetchWeatherData(): Promise<WeatherData | null> {
+  // Use location-based caching with longer duration
   const cacheKey = 'weather_cache';
   const cacheDateKey = 'weather_cache_date';
+  const locationCacheKey = 'weather_location_cache';
   const today = new Date().toISOString().slice(0, 10);
 
   const cachedWeather = localStorage.getItem(cacheKey);
   const cacheDate = localStorage.getItem(cacheDateKey);
+  const cachedLocation = localStorage.getItem(locationCacheKey);
 
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, Math.random() * 1200 + 400));
-
+  // Check if we have recent cached data (same day)
   if (cachedWeather && cacheDate === today) {
     try {
-      return JSON.parse(cachedWeather);
+      const weatherData = JSON.parse(cachedWeather);
+      // Use cached location if available to avoid API calls
+      if (cachedLocation) {
+        weatherData.location = cachedLocation;
+      }
+      console.log('🚀 Using cached weather data:', weatherData.location);
+      return weatherData;
     } catch {
       // Clear invalid cache
       localStorage.removeItem(cacheKey);
       localStorage.removeItem(cacheDateKey);
+      localStorage.removeItem(locationCacheKey);
     }
   }
 
@@ -199,14 +277,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
             );
             
             if (locationResponse.data) {
-              const location = locationResponse.data;
-              if (location.city && location.countryName) {
-                locationName = `${location.city}, ${location.countryName}`;
-              } else if (location.locality && location.countryName) {
-                locationName = `${location.locality}, ${location.countryName}`;
-              } else if (location.countryName) {
-                locationName = location.countryName;
-              }
+              locationName = formatLocationName(locationResponse.data);
             }
           } catch (locationError) {
             console.warn('Primary location service failed, trying fallback:', locationError);
@@ -223,14 +294,13 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
               
               if (fallbackResponse.data && fallbackResponse.data.address) {
                 const addr = fallbackResponse.data.address;
-                const city = addr.city || addr.town || addr.village || addr.hamlet;
-                const country = addr.country;
-                
-                if (city && country) {
-                  locationName = `${city}, ${country}`;
-                } else if (country) {
-                  locationName = country;
-                }
+                locationName = formatLocationName({
+                  city: addr.city,
+                  town: addr.town,
+                  village: addr.village,
+                  hamlet: addr.hamlet,
+                  country: addr.country
+                });
               }
             } catch (fallbackError) {
               console.warn('Fallback location service also failed:', fallbackError);
@@ -243,14 +313,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
                 );
                 
                 if (thirdResponse.data) {
-                  const location = thirdResponse.data;
-                  if (location.city && location.countryName) {
-                    locationName = `${location.city}, ${location.countryName}`;
-                  } else if (location.locality && location.countryName) {
-                    locationName = `${location.locality}, ${location.countryName}`;
-                  } else if (location.countryName) {
-                    locationName = location.countryName;
-                  }
+                  locationName = formatLocationName(thirdResponse.data);
                 }
               } catch (finalError) {
                 console.warn('All location services failed:', finalError);
@@ -269,6 +332,7 @@ async function fetchWeatherData(): Promise<WeatherData | null> {
           console.log('🌍 Weather data fetched successfully:', locationName);
           localStorage.setItem(cacheKey, JSON.stringify(weatherData));
           localStorage.setItem(cacheDateKey, today);
+          localStorage.setItem(locationCacheKey, locationName);
           
           resolve(weatherData);
         } catch (error) {

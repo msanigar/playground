@@ -246,7 +246,7 @@ export default function Canvas() {
   }, []);
 
   // Canvas mouse/touch event handlers
-  const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     
@@ -254,9 +254,23 @@ export default function Canvas() {
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
+    // Handle both mouse and touch events
+    let clientX: number, clientY: number;
+    
+    if ('touches' in e) {
+      // Touch event
+      const touch = e.touches[0] || e.changedTouches[0];
+      clientX = touch.clientX;
+      clientY = touch.clientY;
+    } else {
+      // Mouse event
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
     };
   }, []);
 
@@ -296,6 +310,34 @@ export default function Canvas() {
       canvasServiceRef.current.removeCursor();
     }
   }, [isDrawing, stopDrawing, isConnected]);
+
+  // Touch event handlers for mobile support
+  const handleCanvasTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const { x, y } = getEventPosition(e);
+    startDrawing(x, y);
+  }, [getEventPosition, startDrawing]);
+
+  const handleCanvasTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const { x, y } = getEventPosition(e);
+    
+    // Update cursor position in Supabase
+    if (canvasServiceRef.current && isConnected) {
+      canvasServiceRef.current.updateCursor(x, y);
+    }
+    
+    if (isDrawing) {
+      continueDrawing(x, y);
+    }
+  }, [getEventPosition, isConnected, isDrawing, continueDrawing]);
+  
+  const handleCanvasTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    if (isDrawing) {
+      stopDrawing();
+    }
+  }, [isDrawing, stopDrawing]);
 
   const handleClearCanvas = useCallback(async () => {
     if (canvasServiceRef.current && isConnected) {
@@ -346,127 +388,201 @@ export default function Canvas() {
 
   return (
     <div className="min-h-screen bg-gray-50 relative overflow-hidden">
-      {/* Collaborators Panel */}
-      <div className="absolute top-4 left-4 z-20">
-        <div className="bg-white rounded-lg shadow-lg p-4 min-w-[200px]">
-          <h3 className="font-semibold text-gray-900 mb-3">Collaborators</h3>
-          <div className="space-y-2">
-            {/* Current User */}
-            <div className="flex items-center space-x-2">
-              <div 
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: currentUser.color }}
-              />
-              <span className="text-sm text-gray-700">{currentUser.name} (You)</span>
+      {/* Mobile-optimized layout */}
+      <div className="flex flex-col h-screen">
+        {/* Mobile Toolbar - Horizontal at top */}
+        <div className="lg:hidden bg-white border-b border-gray-200 p-2 z-30">
+          <div className="flex items-center justify-between gap-2 overflow-x-auto">
+            {/* Tools */}
+            <div className="flex gap-1 shrink-0">
+              <button
+                onClick={() => setTool('brush')}
+                className={`px-2 py-1 rounded text-sm ${
+                  settings.tool === 'brush'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 hover:bg-gray-200'
+                }`}
+                title="Brush"
+              >
+                🖌️
+              </button>
+              <button
+                onClick={() => setTool('eraser')}
+                className={`px-2 py-1 rounded text-sm ${
+                  settings.tool === 'eraser'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 hover:bg-gray-200'
+                }`}
+                title="Eraser"
+              >
+                🧽
+              </button>
             </div>
             
-            {/* Other Collaborators */}
-            {Array.from(collaborators.values()).map(collaborator => (
-              <div key={collaborator.id} className="flex items-center space-x-2">
+            {/* Size slider */}
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-xs text-gray-600 shrink-0">Size:</span>
+              <input
+                type="range"
+                min="1"
+                max="50"
+                value={settings.brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                className="flex-1"
+              />
+              <span className="text-xs text-gray-600 w-6 shrink-0">{settings.brushSize}</span>
+            </div>
+            
+            {/* Color and actions */}
+            <div className="flex items-center gap-1 shrink-0">
+              <input
+                type="color"
+                value={settings.brushColor}
+                onChange={(e) => setBrushColor(e.target.value)}
+                className="w-6 h-6 rounded border"
+              />
+              <button
+                onClick={handleUndoLastStroke}
+                className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 text-sm"
+                title="Undo"
+              >
+                ↩️
+              </button>
+              <button
+                onClick={handleClearCanvas}
+                className="px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600 text-sm"
+                title="Clear"
+              >
+                🗑️
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop Collaborators Panel */}
+        <div className="hidden lg:block absolute top-4 left-4 z-20">
+          <div className="bg-white rounded-lg shadow-lg p-4 min-w-[200px]">
+            <h3 className="font-semibold text-gray-900 mb-3">Collaborators</h3>
+            <div className="space-y-2">
+              {/* Current User */}
+              <div className="flex items-center space-x-2">
                 <div 
                   className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: collaborator.color }}
+                  style={{ backgroundColor: currentUser.color }}
                 />
-                <span className="text-sm text-gray-700">{collaborator.name}</span>
-                {collaborator.isDrawing && (
-                  <span className="text-xs text-blue-600">✏️</span>
-                )}
+                <span className="text-sm text-gray-700">{currentUser.name} (You)</span>
               </div>
-            ))}
+              
+              {/* Other Collaborators */}
+              {Array.from(collaborators.values()).map(collaborator => (
+                <div key={collaborator.id} className="flex items-center space-x-2">
+                  <div 
+                    className="w-3 h-3 rounded-full"
+                    style={{ backgroundColor: collaborator.color }}
+                  />
+                  <span className="text-sm text-gray-700">{collaborator.name}</span>
+                  {collaborator.isDrawing && (
+                    <span className="text-xs text-blue-600">✏️</span>
+                  )}
+                </div>
+              ))}
+              
+              {Array.from(collaborators.values()).length === 0 && (
+                <p className="text-sm text-gray-500">No other collaborators</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Desktop Drawing Toolbar */}
+        <div className="hidden lg:block absolute top-4 right-4 z-20">
+          <div className="bg-white rounded-lg shadow-lg p-4 space-y-4">
+            {/* Tools */}
+            <div className="flex space-x-2">
+              <button
+                onClick={() => setTool('brush')}
+                className={`px-3 py-2 rounded ${
+                  settings.tool === 'brush'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 hover:bg-gray-200'
+                }`}
+                title="Brush Tool"
+              >
+                🖌️
+              </button>
+              <button
+                onClick={() => setTool('eraser')}
+                className={`px-3 py-2 rounded ${
+                  settings.tool === 'eraser'
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-100 hover:bg-gray-200'
+                }`}
+                title="Eraser Tool"
+              >
+                🧽
+              </button>
+            </div>
             
-            {Array.from(collaborators.values()).length === 0 && (
-              <p className="text-sm text-gray-500">No other collaborators</p>
-            )}
+            {/* Brush Size */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-600">Size:</span>
+              <input
+                type="range"
+                min="1"
+                max="50"
+                value={settings.brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                className="flex-1"
+              />
+              <span className="text-sm text-gray-600 w-8">{settings.brushSize}</span>
+            </div>
+            
+            {/* Color Picker */}
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-600">Color:</span>
+              <input
+                type="color"
+                value={settings.brushColor}
+                onChange={(e) => setBrushColor(e.target.value)}
+                className="w-8 h-8 rounded border border-gray-300"
+              />
+            </div>
+            
+            {/* Actions */}
+            <div className="flex space-x-2">
+              <button
+                onClick={handleUndoLastStroke}
+                className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200"
+                title="Undo Last Stroke"
+              >
+                ↩️
+              </button>
+              <button
+                onClick={handleClearCanvas}
+                className="px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
+                title="Clear Canvas"
+              >
+                🗑️
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Drawing Toolbar */}
-      <div className="absolute top-4 right-4 z-20">
-        <div className="bg-white rounded-lg shadow-lg p-4 space-y-4">
-          {/* Tools */}
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setTool('brush')}
-              className={`px-3 py-2 rounded ${
-                settings.tool === 'brush'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 hover:bg-gray-200'
-              }`}
-              title="Brush Tool"
-            >
-              🖌️
-            </button>
-            <button
-              onClick={() => setTool('eraser')}
-              className={`px-3 py-2 rounded ${
-                settings.tool === 'eraser'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 hover:bg-gray-200'
-              }`}
-              title="Eraser Tool"
-            >
-              🧽
-            </button>
-          </div>
-          
-          {/* Brush Size */}
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600">Size:</span>
-            <input
-              type="range"
-              min="1"
-              max="50"
-              value={settings.brushSize}
-              onChange={(e) => setBrushSize(Number(e.target.value))}
-              className="flex-1"
-            />
-            <span className="text-sm text-gray-600 w-8">{settings.brushSize}</span>
-          </div>
-          
-          {/* Color Picker */}
-          <div className="flex items-center space-x-2">
-            <span className="text-sm text-gray-600">Color:</span>
-            <input
-              type="color"
-              value={settings.brushColor}
-              onChange={(e) => setBrushColor(e.target.value)}
-              className="w-8 h-8 rounded border border-gray-300"
-            />
-          </div>
-          
-          {/* Actions */}
-          <div className="flex space-x-2">
-            <button
-              onClick={handleUndoLastStroke}
-              className="px-3 py-2 rounded bg-gray-100 hover:bg-gray-200"
-              title="Undo Last Stroke"
-            >
-              ↩️
-            </button>
-            <button
-              onClick={handleClearCanvas}
-              className="px-3 py-2 rounded bg-red-500 text-white hover:bg-red-600"
-              title="Clear Canvas"
-            >
-              🗑️
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Canvas */}
-      <div className="relative w-full h-screen">
-        <canvas
-          ref={canvasRef}
-          width={settings.canvasWidth}
-          height={settings.canvasHeight}
-          className="absolute inset-0 w-full h-full cursor-crosshair bg-white"
-          onMouseDown={handleCanvasMouseDown}
-          onMouseMove={handleCanvasMouseMove}
-          onMouseUp={handleCanvasMouseUp}
-          onMouseLeave={handleCanvasMouseLeave}
-        />
+        {/* Canvas */}
+        <div className="relative flex-1 w-full">
+          <canvas
+            ref={canvasRef}
+            width={settings.canvasWidth}
+            height={settings.canvasHeight}
+            className="absolute inset-0 w-full h-full cursor-crosshair bg-white touch-none"
+            onMouseDown={handleCanvasMouseDown}
+            onMouseMove={handleCanvasMouseMove}
+            onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseLeave}
+            onTouchStart={handleCanvasTouchStart}
+            onTouchMove={handleCanvasTouchMove}
+            onTouchEnd={handleCanvasTouchEnd}
+          />
         
         {/* Collaborator cursors */}
         {Array.from(collaborators.values()).map(collaborator => (
@@ -493,22 +609,23 @@ export default function Canvas() {
             </div>
           )
         ))}
-      </div>
-
-      {/* Development Info */}
-      {import.meta.env.DEV && (
-        <div className="fixed bottom-4 right-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs">
-          <div>Room: {canvasId}</div>
-          <div>Status: {isConnected ? '🟢 Supabase Connected' : '🔴 Offline Mode'}</div>
-          <div>Collaborators: {Array.from(collaborators.values()).length}</div>
-          <div className="mt-2 text-gray-300">
-            {isConnected ? 'Real-time collaboration active' : 'Local canvas only'}
-          </div>
-          <div className="text-gray-300">
-            Add ?room=your-room-name to URL to change rooms
-          </div>
         </div>
-      )}
+
+        {/* Development Info */}
+        {import.meta.env.DEV && (
+          <div className="fixed bottom-4 right-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs">
+            <div>Room: {canvasId}</div>
+            <div>Status: {isConnected ? '🟢 Supabase Connected' : '🔴 Offline Mode'}</div>
+            <div>Collaborators: {Array.from(collaborators.values()).length}</div>
+            <div className="mt-2 text-gray-300">
+              {isConnected ? 'Real-time collaboration active' : 'Local canvas only'}
+            </div>
+            <div className="text-gray-300">
+              Add ?room=your-room-name to URL to change rooms
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 } 

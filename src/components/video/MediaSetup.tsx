@@ -284,70 +284,76 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
 
           {/* Controls */}
           <div className="space-y-6">
-            {/* Device Selection */}
+            {/* Device Selection - Only show if devices are available */}
             <div className="space-y-4">
-              <div>
-                <label className="block text-blue-200 text-sm font-medium mb-2">
-                  Camera
-                </label>
-                <select
-                  value={selectedCamera}
-                  onChange={(e) => {
-                    const deviceId = e.target.value;
-                    setSelectedCamera(deviceId);
-                    handleDeviceChange('cameraDeviceId', deviceId);
-                  }}
-                  className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
-                >
-                  {devices.cameras.map((camera) => (
-                    <option key={camera.deviceId} value={camera.deviceId} className="bg-gray-800">
-                      {camera.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {devices.cameras.length > 0 && (
+                <div>
+                  <label className="block text-blue-200 text-sm font-medium mb-2">
+                    Camera
+                  </label>
+                  <select
+                    value={selectedCamera}
+                    onChange={(e) => {
+                      const deviceId = e.target.value;
+                      setSelectedCamera(deviceId);
+                      handleDeviceChange('cameraDeviceId', deviceId);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
+                  >
+                    {devices.cameras.map((camera) => (
+                      <option key={camera.deviceId} value={camera.deviceId} className="bg-gray-800">
+                        {camera.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-blue-200 text-sm font-medium mb-2">
-                  Microphone
-                </label>
-                <select
-                  value={selectedMicrophone}
-                  onChange={(e) => {
-                    const deviceId = e.target.value;
-                    setSelectedMicrophone(deviceId);
-                    handleDeviceChange('microphoneDeviceId', deviceId);
-                  }}
-                  className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
-                >
-                  {devices.microphones.map((mic) => (
-                    <option key={mic.deviceId} value={mic.deviceId} className="bg-gray-800">
-                      {mic.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {devices.microphones.length > 0 && (
+                <div>
+                  <label className="block text-blue-200 text-sm font-medium mb-2">
+                    Microphone
+                  </label>
+                  <select
+                    value={selectedMicrophone}
+                    onChange={(e) => {
+                      const deviceId = e.target.value;
+                      setSelectedMicrophone(deviceId);
+                      handleDeviceChange('microphoneDeviceId', deviceId);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
+                  >
+                    {devices.microphones.map((mic) => (
+                      <option key={mic.deviceId} value={mic.deviceId} className="bg-gray-800">
+                        {mic.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-              <div>
-                <label className="block text-blue-200 text-sm font-medium mb-2">
-                  Speaker
-                </label>
-                <select
-                  value={selectedSpeaker}
-                  onChange={(e) => {
-                    const deviceId = e.target.value;
-                    setSelectedSpeaker(deviceId);
-                    handleDeviceChange('speakerDeviceId', deviceId);
-                  }}
-                  className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
-                >
-                  {devices.speakers.map((speaker) => (
-                    <option key={speaker.deviceId} value={speaker.deviceId} className="bg-gray-800">
-                      {speaker.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {devices.speakers.length > 0 && (
+                <div>
+                  <label className="block text-blue-200 text-sm font-medium mb-2">
+                    Speaker
+                  </label>
+                  <select
+                    value={selectedSpeaker}
+                    onChange={(e) => {
+                      const deviceId = e.target.value;
+                      setSelectedSpeaker(deviceId);
+                      handleDeviceChange('speakerDeviceId', deviceId);
+                    }}
+                    className="w-full px-4 py-3 rounded-xl backdrop-blur-sm bg-white/10 border border-white/20 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
+                  >
+                    {devices.speakers.map((speaker) => (
+                      <option key={speaker.deviceId} value={speaker.deviceId} className="bg-gray-800">
+                        {speaker.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Audio Level Indicator */}
               <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4 border border-white/20">
