@@ -246,7 +246,7 @@ export default function Canvas() {
   }, []);
 
   // Canvas mouse/touch event handlers
-  const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+  const getEventPosition = useCallback((e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement> | MouseEvent | TouchEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     
@@ -311,33 +311,49 @@ export default function Canvas() {
     }
   }, [isDrawing, stopDrawing, isConnected]);
 
-  // Touch event handlers for mobile support
-  const handleCanvasTouchStart = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const { x, y } = getEventPosition(e);
-    startDrawing(x, y);
-  }, [getEventPosition, startDrawing]);
+  // Touch event handlers for mobile support with proper passive event handling
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  const handleCanvasTouchMove = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    const { x, y } = getEventPosition(e);
-    
-    // Update cursor position in Supabase
-    if (canvasServiceRef.current && isConnected) {
-      canvasServiceRef.current.updateCursor(x, y);
-    }
-    
-    if (isDrawing) {
-      continueDrawing(x, y);
-    }
-  }, [getEventPosition, isConnected, isDrawing, continueDrawing]);
-  
-  const handleCanvasTouchEnd = useCallback((e: React.TouchEvent<HTMLCanvasElement>) => {
-    e.preventDefault();
-    if (isDrawing) {
-      stopDrawing();
-    }
-  }, [isDrawing, stopDrawing]);
+         const handleTouchStart = (e: TouchEvent) => {
+       e.preventDefault();
+       const { x, y } = getEventPosition(e);
+       startDrawing(x, y);
+     };
+
+     const handleTouchMove = (e: TouchEvent) => {
+       e.preventDefault();
+       const { x, y } = getEventPosition(e);
+      
+      // Update cursor position in Supabase
+      if (canvasServiceRef.current && isConnected) {
+        canvasServiceRef.current.updateCursor(x, y);
+      }
+      
+      if (isDrawing) {
+        continueDrawing(x, y);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      if (isDrawing) {
+        stopDrawing();
+      }
+    };
+
+    // Add event listeners with passive: false to allow preventDefault
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+    canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+      canvas.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [getEventPosition, startDrawing, isConnected, isDrawing, continueDrawing, stopDrawing]);
 
   const handleClearCanvas = useCallback(async () => {
     if (canvasServiceRef.current && isConnected) {
@@ -579,9 +595,6 @@ export default function Canvas() {
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
             onMouseLeave={handleCanvasMouseLeave}
-            onTouchStart={handleCanvasTouchStart}
-            onTouchMove={handleCanvasTouchMove}
-            onTouchEnd={handleCanvasTouchEnd}
           />
         
         {/* Collaborator cursors */}
