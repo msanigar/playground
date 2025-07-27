@@ -36,14 +36,15 @@ async function fetchBackgroundImage(): Promise<BackgroundData> {
   const cacheDate = localStorage.getItem('bg_cache_date');
   const today = new Date().toISOString().slice(0, 10);
 
-  // Simulate network delay for demo
-  await new Promise(resolve => setTimeout(resolve, Math.random() * 1000 + 500));
-
+  // Return cached data immediately if available
   if (cached && cacheDate === today) {
     try {
-      return JSON.parse(cached);
+      const cachedData = JSON.parse(cached);
+      console.log('🚀 Using cached background image');
+      return cachedData;
     } catch {
       // Clear invalid cache
+      console.warn('⚠️ Invalid background cache, clearing...');
       localStorage.removeItem('bg_cache');
       localStorage.removeItem('bg_cache_date');
     }
@@ -68,6 +69,7 @@ async function fetchBackgroundImage(): Promise<BackgroundData> {
 
     localStorage.setItem('bg_cache', JSON.stringify(backgroundData));
     localStorage.setItem('bg_cache_date', today);
+    console.log('📸 Fetched and cached new background image:', backgroundData.photographer);
     
     return backgroundData;
   } catch {
@@ -87,10 +89,9 @@ async function fetchDailyQuote(): Promise<QuoteData> {
   const cacheDate = localStorage.getItem('quote_cache_date');
   const today = new Date().toISOString().slice(0, 10);
 
-  // Simulate network delay for consistent UX
-  await new Promise(resolve => setTimeout(resolve, Math.random() * 800 + 300));
-
+  // Return cached quote immediately if available
   if (cached && cachedAuthor && cacheDate === today) {
+    console.log('🚀 Using cached daily quote');
     return { text: cached, author: cachedAuthor };
   }
 
@@ -126,6 +127,7 @@ async function fetchDailyQuote(): Promise<QuoteData> {
   localStorage.setItem('quote_cache', selectedQuote.text);
   localStorage.setItem('quote_cache_author', selectedQuote.author);
   localStorage.setItem('quote_cache_date', today);
+  console.log('💬 Generated and cached daily quote by:', selectedQuote.author);
   
   return selectedQuote;
 }
@@ -684,6 +686,7 @@ export default function Now() {
 
   const handleRefresh = () => {
     // Clear all caches to force fresh data
+    console.log('🔄 Clearing all /now/ caches and refreshing...');
     localStorage.removeItem('bg_cache');
     localStorage.removeItem('bg_cache_date');
     localStorage.removeItem('quote_cache');
@@ -691,6 +694,8 @@ export default function Now() {
     localStorage.removeItem('quote_cache_date');
     localStorage.removeItem('weather_cache');
     localStorage.removeItem('weather_cache_date');
+    localStorage.removeItem('weather_location_cache');
+    localStorage.removeItem('weather_cache_version');
     
     setRefreshKey(prev => prev + 1);
   };
@@ -755,12 +760,24 @@ export default function Now() {
 
       {/* Controls */}
       <div className="absolute top-4 left-4 flex gap-2 z-50">
+        {/* Cache Status Indicator */}
+        <motion.div
+          className="p-2 bg-black/20 backdrop-blur-sm border border-white/10 rounded-lg text-white/60 text-xs flex items-center gap-1"
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.8 }}
+          title="Cache Status: Green = Cached Today"
+        >
+          <span className="text-green-400">●</span>
+          <span>Cache</span>
+        </motion.div>
+
         <motion.button
           onClick={handleRefresh}
           className="p-3 bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/20 rounded-lg text-white transition-colors"
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          title="Refresh"
+          title="Refresh All Content (Background, Quote, Weather)"
         >
           <motion.span
             animate={{ rotate: refreshKey * 360 }}

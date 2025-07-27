@@ -283,25 +283,60 @@ export default function Canvas() {
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { x, y } = getEventPosition(e);
     
-    // Update cursor position in Supabase
-    if (canvasServiceRef.current && isConnected) {
-      canvasServiceRef.current.updateCursor(x, y);
+    // Throttle cursor updates to max 20fps for performance (mouse events are also high frequency)
+    const now = Date.now();
+    if (now - lastCursorUpdate.current > 50) { // 50ms = 20fps
+      lastCursorUpdate.current = now;
+      if (canvasServiceRef.current && isConnected) {
+        canvasServiceRef.current.updateCursor(x, y);
+      }
     }
     
     if (isDrawing) {
-      continueDrawing(x, y);
+      // Use requestAnimationFrame for smooth drawing on mouse too
+      pendingDrawPoint.current = { x, y };
+      
+      if (!animationFrameRef.current) {
+        animationFrameRef.current = requestAnimationFrame(() => {
+          if (pendingDrawPoint.current && isDrawing) {
+            continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
+            pendingDrawPoint.current = null;
+          }
+          animationFrameRef.current = null;
+        });
+      }
     }
   }, [getEventPosition, isConnected, isDrawing, continueDrawing]);
   
   const handleCanvasMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     if (isDrawing) {
+      // Cancel any pending animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      // Process any final pending point
+      if (pendingDrawPoint.current) {
+        continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
+        pendingDrawPoint.current = null;
+      }
       stopDrawing();
     }
-  }, [isDrawing, stopDrawing]);
+  }, [isDrawing, stopDrawing, continueDrawing]);
   
   const handleCanvasMouseLeave = useCallback(() => {
     if (isDrawing) {
+      // Cancel any pending animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      // Process any final pending point
+      if (pendingDrawPoint.current) {
+        continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
+        pendingDrawPoint.current = null;
+      }
       stopDrawing();
     }
     
@@ -309,36 +344,66 @@ export default function Canvas() {
     if (canvasServiceRef.current && isConnected) {
       canvasServiceRef.current.removeCursor();
     }
-  }, [isDrawing, stopDrawing, isConnected]);
+  }, [isDrawing, stopDrawing, isConnected, continueDrawing]);
+
+    // Performance optimization refs
+  const lastCursorUpdate = useRef<number>(0);
+  const animationFrameRef = useRef<number | null>(null);
+  const pendingDrawPoint = useRef<{x: number, y: number} | null>(null);
 
   // Touch event handlers for mobile support with proper passive event handling
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-         const handleTouchStart = (e: TouchEvent) => {
-       e.preventDefault();
-       const { x, y } = getEventPosition(e);
-       startDrawing(x, y);
-     };
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      const { x, y } = getEventPosition(e);
+      startDrawing(x, y);
+    };
 
-     const handleTouchMove = (e: TouchEvent) => {
-       e.preventDefault();
-       const { x, y } = getEventPosition(e);
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const { x, y } = getEventPosition(e);
       
-      // Update cursor position in Supabase
-      if (canvasServiceRef.current && isConnected) {
-        canvasServiceRef.current.updateCursor(x, y);
+      // Throttle cursor updates to max 20fps for performance
+      const now = Date.now();
+      if (now - lastCursorUpdate.current > 50) { // 50ms = 20fps
+        lastCursorUpdate.current = now;
+        if (canvasServiceRef.current && isConnected) {
+          canvasServiceRef.current.updateCursor(x, y);
+        }
       }
       
       if (isDrawing) {
-        continueDrawing(x, y);
+        // Use requestAnimationFrame for smooth drawing
+        pendingDrawPoint.current = { x, y };
+        
+        if (!animationFrameRef.current) {
+          animationFrameRef.current = requestAnimationFrame(() => {
+            if (pendingDrawPoint.current && isDrawing) {
+              continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
+              pendingDrawPoint.current = null;
+            }
+            animationFrameRef.current = null;
+          });
+        }
       }
     };
-
+    
     const handleTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
       if (isDrawing) {
+        // Cancel any pending animation frame
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+          animationFrameRef.current = null;
+        }
+        // Process any final pending point
+        if (pendingDrawPoint.current) {
+          continueDrawing(pendingDrawPoint.current.x, pendingDrawPoint.current.y);
+          pendingDrawPoint.current = null;
+        }
         stopDrawing();
       }
     };
@@ -352,6 +417,12 @@ export default function Canvas() {
       canvas.removeEventListener('touchstart', handleTouchStart);
       canvas.removeEventListener('touchmove', handleTouchMove);
       canvas.removeEventListener('touchend', handleTouchEnd);
+      
+      // Cleanup any pending animation frame
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
   }, [getEventPosition, startDrawing, isConnected, isDrawing, continueDrawing, stopDrawing]);
 
