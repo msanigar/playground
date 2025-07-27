@@ -40,7 +40,7 @@ function InnerApp({
   const location = useLocation();
 
   return (
-    <div className="min-h-screen transition-colors bg-white text-black dark:bg-gray-900 dark:text-white">
+    <div className="min-h-screen min-h-[100dvh] transition-colors bg-white text-black dark:bg-gray-900 dark:text-white">
       {/* NAV */}
       <nav className="border-b border-gray-200 dark:border-gray-700">
         {/* Mobile-first responsive navigation */}

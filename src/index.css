@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Ensure body and html have proper background colors for safe areas */
+html,
+body {
+  @apply bg-white dark:bg-gray-900;
+  /* Ensure full coverage including safe areas on iOS */
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+/* iOS Safari safe area background fix */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  @apply bg-white dark:bg-gray-900;
+  z-index: -1;
+  pointer-events: none;
+}
+
 .dark input[type='date']::-webkit-calendar-picker-indicator,
 .dark input[type='time']::-webkit-calendar-picker-indicator {
   filter: invert(1);
