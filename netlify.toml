@@ -25,18 +25,7 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     
     # Permissions Policy for video calling features
-    Permissions-Policy = """
-      compute-pressure=*, 
-      camera=*, 
-      microphone=*, 
-      display-capture=*, 
-      screen-wake-lock=*, 
-      web-share=*,
-      autoplay=*,
-      encrypted-media=*,
-      fullscreen=*,
-      picture-in-picture=*
-    """
+    Permissions-Policy = "compute-pressure=*, camera=*, microphone=*, display-capture=*, screen-wake-lock=*, web-share=*, autoplay=*, encrypted-media=*, fullscreen=*, picture-in-picture=*"
     
     # Content Security Policy (relaxed for Whereby and other APIs)
     Content-Security-Policy = """

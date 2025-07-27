@@ -22,18 +22,22 @@ interface DevicePreferences {
 
 const saveDevicePreferences = (preferences: DevicePreferences) => {
   try {
+    console.log('💾 Saving device preferences to localStorage:', preferences);
     localStorage.setItem(DEVICE_PREFERENCES_KEY, JSON.stringify(preferences));
+    console.log('✅ Device preferences saved successfully');
   } catch (error) {
-    console.warn('Failed to save device preferences:', error);
+    console.warn('❌ Failed to save device preferences:', error);
   }
 };
 
 const loadDevicePreferences = (): DevicePreferences => {
   try {
     const saved = localStorage.getItem(DEVICE_PREFERENCES_KEY);
-    return saved ? JSON.parse(saved) : {};
+    const parsed = saved ? JSON.parse(saved) : {};
+    console.log('📂 Loaded device preferences from localStorage:', parsed);
+    return parsed;
   } catch (error) {
-    console.warn('Failed to load device preferences:', error);
+    console.warn('❌ Failed to load device preferences:', error);
     return {};
   }
 };
@@ -54,7 +58,7 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
   });
   
   // Load device preferences
-  const [devicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -63,7 +67,10 @@ export default function MediaSetup({ onComplete, onBack, userName }: MediaSetupP
   
   // Save device preference and update state
   const handleDeviceChange = (deviceType: keyof DevicePreferences, deviceId: string) => {
+    console.log('🔧 Device changed in setup:', { deviceType, deviceId });
     const newPreferences = { ...devicePreferences, [deviceType]: deviceId };
+    console.log('🔧 New preferences object:', newPreferences);
+    setDevicePreferences(newPreferences);
     saveDevicePreferences(newPreferences);
   };
 

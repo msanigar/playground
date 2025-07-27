@@ -54,7 +54,11 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
     microphones: [],
     speakers: []
   });
-  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => loadDevicePreferences());
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => {
+    const prefs = loadDevicePreferences();
+    console.log('🔧 Loaded device preferences in VideoCall:', prefs);
+    return prefs;
+  });
   
   // Initialize media with basic settings
   const localMedia = useLocalMedia({
@@ -153,57 +157,98 @@ export default function VideoCall({ roomUrl, displayName, onLeave }: VideoCallPr
 
   // Apply saved device preferences when local stream is ready
   useEffect(() => {
+    console.log('🔄 Device preference effect triggered:', {
+      hasStream: !!localParticipant?.stream,
+      cameraDeviceId: devicePreferences.cameraDeviceId,
+      microphoneDeviceId: devicePreferences.microphoneDeviceId,
+      connectionStatus: state.connectionStatus
+    });
+
     const applyDevicePreferences = async () => {
-      if (!localParticipant?.stream || !devicePreferences.cameraDeviceId) return;
+      console.log('🔧 Checking if should apply device preferences...');
+      
+      if (!localParticipant?.stream) {
+        console.log('❌ No local stream yet');
+        return;
+      }
+      
+      if (!devicePreferences.cameraDeviceId && !devicePreferences.microphoneDeviceId) {
+        console.log('❌ No device preferences to apply');
+        return;
+      }
       
       try {
-        console.log('📹 Applying saved camera preference:', devicePreferences.cameraDeviceId);
+        console.log('📹 Applying device preferences:', {
+          camera: devicePreferences.cameraDeviceId,
+          microphone: devicePreferences.microphoneDeviceId
+        });
         
-        // Get new stream with preferred camera
-        const constraints: MediaStreamConstraints = {
-          video: { deviceId: { exact: devicePreferences.cameraDeviceId } },
-          audio: devicePreferences.microphoneDeviceId 
-            ? { deviceId: { exact: devicePreferences.microphoneDeviceId } }
-            : true
-        };
+        // Get current track info for comparison
+        const currentVideoTrack = localParticipant.stream.getVideoTracks()[0];
+        const currentAudioTrack = localParticipant.stream.getAudioTracks()[0];
         
-        const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+        console.log('📊 Current tracks:', {
+          video: currentVideoTrack ? {
+            label: currentVideoTrack.label,
+            deviceId: currentVideoTrack.getSettings().deviceId
+          } : 'none',
+          audio: currentAudioTrack ? {
+            label: currentAudioTrack.label,
+            deviceId: currentAudioTrack.getSettings().deviceId
+          } : 'none'
+        });
         
-        // Replace video track in existing stream
-        const videoTrack = newStream.getVideoTracks()[0];
-        const audioTrack = newStream.getAudioTracks()[0];
-        
-        if (videoTrack && localParticipant.stream) {
-          // Replace video track
-          const oldVideoTrack = localParticipant.stream.getVideoTracks()[0];
-          if (oldVideoTrack) {
-            localParticipant.stream.removeTrack(oldVideoTrack);
-            oldVideoTrack.stop();
+        // Check if camera needs switching
+        if (devicePreferences.cameraDeviceId && 
+            currentVideoTrack?.getSettings().deviceId !== devicePreferences.cameraDeviceId) {
+          console.log('🔄 Switching camera from', currentVideoTrack.getSettings().deviceId, 'to', devicePreferences.cameraDeviceId);
+          
+          const videoConstraints = { deviceId: { exact: devicePreferences.cameraDeviceId } };
+          const newVideoStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+          const newVideoTrack = newVideoStream.getVideoTracks()[0];
+          
+          if (newVideoTrack) {
+            // Replace video track
+            localParticipant.stream.removeTrack(currentVideoTrack);
+            currentVideoTrack.stop();
+            localParticipant.stream.addTrack(newVideoTrack);
+            console.log('✅ Camera switched successfully to:', newVideoTrack.label);
           }
-          localParticipant.stream.addTrack(videoTrack);
         }
         
-        if (audioTrack && localParticipant.stream && devicePreferences.microphoneDeviceId) {
-          // Replace audio track
-          const oldAudioTrack = localParticipant.stream.getAudioTracks()[0];
-          if (oldAudioTrack) {
-            localParticipant.stream.removeTrack(oldAudioTrack);
-            oldAudioTrack.stop();
+        // Check if microphone needs switching
+        if (devicePreferences.microphoneDeviceId && 
+            currentAudioTrack?.getSettings().deviceId !== devicePreferences.microphoneDeviceId) {
+          console.log('🔄 Switching microphone from', currentAudioTrack.getSettings().deviceId, 'to', devicePreferences.microphoneDeviceId);
+          
+          const audioConstraints = { deviceId: { exact: devicePreferences.microphoneDeviceId } };
+          const newAudioStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
+          const newAudioTrack = newAudioStream.getAudioTracks()[0];
+          
+          if (newAudioTrack) {
+            // Replace audio track
+            localParticipant.stream.removeTrack(currentAudioTrack);
+            currentAudioTrack.stop();
+            localParticipant.stream.addTrack(newAudioTrack);
+            console.log('✅ Microphone switched successfully to:', newAudioTrack.label);
           }
-          localParticipant.stream.addTrack(audioTrack);
         }
         
-        console.log('✅ Device preferences applied successfully');
+        console.log('✅ Device preference application completed');
         
       } catch (error) {
         console.error('❌ Failed to apply device preferences:', error);
       }
     };
 
-    if (localParticipant?.stream && (devicePreferences.cameraDeviceId || devicePreferences.microphoneDeviceId)) {
-      applyDevicePreferences();
+    // Only apply after we're connected and have a stream
+    if (localParticipant?.stream && state.connectionStatus === 'connected') {
+      // Add a small delay to ensure stream is fully established
+      setTimeout(() => {
+        applyDevicePreferences();
+      }, 1000);
     }
-  }, [localParticipant?.stream, devicePreferences.cameraDeviceId, devicePreferences.microphoneDeviceId]);
+  }, [localParticipant?.stream, devicePreferences.cameraDeviceId, devicePreferences.microphoneDeviceId, state.connectionStatus]);
 
   // Auto-join room when connection is ready
   useEffect(() => {
